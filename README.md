@@ -51,7 +51,21 @@ If `LLM_PROVIDER` is not set, the service uses the `mock` provider.
 3. Add a new dock:
    - Name: `SAI Moderation`
    - URL: `http://127.0.0.1:8787/dashboard`
+   - If `API_TOKEN` is enabled: `http://127.0.0.1:8787/dashboard?token=YOUR_TOKEN&operator=your_mod_name`
 4. Keep this dock open while streaming; it receives live moderation events from `ws?channel=dashboard`.
+
+The dashboard supports manual actions (`Approve`, `Block`, `False Positive`) and sends them to:
+
+- `POST /v1/overrides`
+- optional forward callback to extension if `MANUAL_OVERRIDE_FORWARD_URL` is set.
+
+## Security and Rate Limits
+
+Optional environment variables:
+
+- `API_TOKEN`: require `Authorization: Bearer <token>` for `POST /v1/moderate`, `POST /v1/events/*`, `POST /v1/overrides`.
+- `RATE_LIMIT_WINDOW_MS` (default: `10000`)
+- `RATE_LIMIT_MAX` (default: `60`) for `/v1/moderate` requests per client IP and window.
 
 ## Release Policy
 

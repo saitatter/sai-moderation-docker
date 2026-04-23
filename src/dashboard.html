@@ -120,6 +120,26 @@
         border-color: rgba(255, 93, 122, 0.4);
         background: rgba(255, 93, 122, 0.1);
       }
+
+      .actions {
+        display: flex;
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .actions button {
+        border: 1px solid var(--line);
+        background: rgba(20, 27, 49, 0.8);
+        color: var(--text);
+        border-radius: 8px;
+        font-size: 11px;
+        padding: 5px 8px;
+        cursor: pointer;
+      }
+
+      .actions button:hover {
+        border-color: #4d5d97;
+      }
     </style>
   </head>
   <body>
@@ -135,6 +155,9 @@
       const statusEl = document.getElementById("status");
       const listEl = document.getElementById("list");
       const maxItems = 100;
+      const urlParams = new URLSearchParams(window.location.search);
+      const apiToken = urlParams.get("token") || "";
+      const operatorId = urlParams.get("operator") || "dashboard-mod";
 
       function setStatus(text, state) {
         statusEl.textContent = text;
@@ -144,6 +167,35 @@
       function formatTime(value) {
         const date = value ? new Date(value) : new Date();
         return date.toLocaleTimeString();
+      }
+
+      async function requestOverride(payload, action) {
+        const reason = window.prompt(`Reason for ${action} on #${payload.messageId}`);
+        if (!reason || !reason.trim()) return;
+
+        try {
+          const response = await fetch("/v1/overrides", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}),
+            },
+            body: JSON.stringify({
+              messageId: payload.messageId,
+              action,
+              operatorId,
+              reason: reason.trim(),
+            }),
+          });
+
+          if (!response.ok) {
+            setStatus(`Override failed (${response.status})`, "closed");
+            return;
+          }
+          setStatus(`Override sent: ${action}`, "connected");
+        } catch {
+          setStatus("Override failed (network)", "closed");
+        }
       }
 
       function addItem(payload) {
@@ -169,6 +221,22 @@
           </div>
         `;
 
+        if (eventType === "moderation.result" && messageId !== "n/a") {
+          const actions = document.createElement("div");
+          actions.className = "actions";
+          actions.innerHTML = `
+            <button data-action="approve">Approve</button>
+            <button data-action="block">Block</button>
+            <button data-action="falsePositive">False Positive</button>
+          `;
+          actions.addEventListener("click", (event) => {
+            const button = event.target.closest("button[data-action]");
+            if (!button) return;
+            requestOverride(payload, button.dataset.action);
+          });
+          item.appendChild(actions);
+        }
+
         listEl.prepend(item);
         while (listEl.children.length > maxItems) {
           listEl.removeChild(listEl.lastElementChild);
@@ -177,7 +245,10 @@
 
       function connect() {
         const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-        const socket = new WebSocket(`${protocol}//${location.host}/ws?channel=dashboard`);
+        const tokenParam = apiToken ? `&token=${encodeURIComponent(apiToken)}` : "";
+        const socket = new WebSocket(
+          `${protocol}//${location.host}/ws?channel=dashboard${tokenParam}`,
+        );
 
         setStatus("Connecting...", "connecting");
 

@@ -12,6 +12,16 @@ afterEach(async () => {
 });
 
 describe("moderation server", () => {
+  const previousApiToken = process.env.API_TOKEN;
+  const previousRateLimitMax = process.env.RATE_LIMIT_MAX;
+  const previousRateLimitWindowMs = process.env.RATE_LIMIT_WINDOW_MS;
+
+  afterEach(() => {
+    resetEnv("API_TOKEN", previousApiToken);
+    resetEnv("RATE_LIMIT_MAX", previousRateLimitMax);
+    resetEnv("RATE_LIMIT_WINDOW_MS", previousRateLimitWindowMs);
+  });
+
   it("returns health payload", async () => {
     app = createModerationServer({ logger: { info() {}, error() {} } });
     const port = await app.start(0);
@@ -21,6 +31,7 @@ describe("moderation server", () => {
 
     expect(response.status).toBe(200);
     expect(body.status).toBe("ok");
+    expect(body.metrics).toBeTruthy();
   });
 
   it("serves dashboard page", async () => {
@@ -100,6 +111,59 @@ describe("moderation server", () => {
       latencyMs: 12,
     });
   });
+
+  it("rejects protected endpoints without token when API_TOKEN is set", async () => {
+    process.env.API_TOKEN = "secret-token";
+    app = createModerationServer({
+      logger: { info() {}, error() {} },
+    });
+    const port = await app.start(0);
+
+    const response = await fetch(`http://127.0.0.1:${port}/v1/moderate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId: "m-1", text: "hello" }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error).toBe("Unauthorized");
+  });
+
+  it("applies rate limit on /v1/moderate", async () => {
+    process.env.RATE_LIMIT_MAX = "1";
+    process.env.RATE_LIMIT_WINDOW_MS = "60000";
+    app = createModerationServer({
+      logger: { info() {}, error() {} },
+      moderationProvider: {
+        async moderate(payload) {
+          return {
+            messageId: payload?.messageId || "m",
+            verdict: "allow",
+            confidence: 1,
+            category: "safe",
+            reason: "ok",
+            latencyMs: 1,
+          };
+        },
+      },
+    });
+    const port = await app.start(0);
+
+    const first = await fetch(`http://127.0.0.1:${port}/v1/moderate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId: "m-1", text: "hello" }),
+    });
+    const second = await fetch(`http://127.0.0.1:${port}/v1/moderate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId: "m-2", text: "hello" }),
+    });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(429);
+  });
 });
 
 function onceOpen(ws) {
@@ -114,6 +178,14 @@ function onceOpen(ws) {
       reject(error);
     });
   });
+}
+
+function resetEnv(key, value) {
+  if (value == null) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
 }
 
 function onceMessage(ws) {
