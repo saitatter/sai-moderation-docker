@@ -1,10 +1,10 @@
 import http from "node:http";
-import crypto from "node:crypto";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { URL, fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { createEventHub } from "./eventHub.js";
+import { createModerationProvider } from "./moderationProvider.js";
 
 function json(res, statusCode, body) {
   res.writeHead(statusCode, { "Content-Type": "application/json" });
@@ -26,22 +26,12 @@ async function readJsonBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-function toModerationResponse(payload) {
-  return {
-    messageId: payload?.messageId || crypto.randomUUID(),
-    verdict: "allow",
-    confidence: 1,
-    category: "safe",
-    reason: "placeholder-verdict",
-    latencyMs: 1,
-  };
-}
-
-export function createModerationServer({ logger = console } = {}) {
+export function createModerationServer({ logger = console, moderationProvider = null } = {}) {
   const eventHub = createEventHub();
   const wss = new WebSocketServer({ noServer: true });
   const currentDir = path.dirname(fileURLToPath(import.meta.url));
   const dashboardPath = path.join(currentDir, "dashboard.html");
+  const provider = moderationProvider || createModerationProvider({ logger });
 
   const server = http.createServer(async (req, res) => {
     const parsed = new URL(req.url || "/", "http://localhost");
@@ -71,10 +61,16 @@ export function createModerationServer({ logger = console } = {}) {
     if (req.method === "POST" && parsed.pathname === "/v1/moderate") {
       try {
         const body = await readJsonBody(req);
-        json(res, 200, toModerationResponse(body));
+        const moderationResponse = await provider.moderate(body);
+        json(res, 200, moderationResponse);
       } catch (error) {
-        logger.error("Invalid moderation request body", error);
-        json(res, 400, { error: "Invalid JSON body" });
+        if (error instanceof SyntaxError) {
+          logger.error("Invalid moderation request body", error);
+          json(res, 400, { error: "Invalid JSON body" });
+        } else {
+          logger.error("Moderation request failed", error);
+          json(res, 500, { error: "Moderation failed" });
+        }
       }
       return;
     }

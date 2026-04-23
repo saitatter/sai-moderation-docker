@@ -21,6 +21,29 @@ npm install
 npm run check
 ```
 
+## Local LLM (Ollama)
+
+`sai-moderation-docker` can call a local Ollama model for `/v1/moderate`.
+
+Environment variables:
+
+- `LLM_PROVIDER=ollama`
+- `OLLAMA_BASE_URL=http://127.0.0.1:11434`
+- `OLLAMA_MODEL=qwen2.5:7b`
+- `LLM_TIMEOUT_MS=6000`
+
+Example:
+
+```bash
+export LLM_PROVIDER=ollama
+export OLLAMA_BASE_URL=http://127.0.0.1:11434
+export OLLAMA_MODEL=qwen2.5:7b
+export LLM_TIMEOUT_MS=6000
+npm run check
+```
+
+If `LLM_PROVIDER` is not set, the service uses the `mock` provider.
+
 ## OBS Dock Setup
 
 1. Start the service (default `:8787`).

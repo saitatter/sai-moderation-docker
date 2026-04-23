@@ -64,6 +64,42 @@ describe("moderation server", () => {
 
     ws.close();
   });
+
+  it("returns moderation response from configured provider", async () => {
+    app = createModerationServer({
+      logger: { info() {}, error() {} },
+      moderationProvider: {
+        async moderate(payload) {
+          return {
+            messageId: payload.messageId || "m-test",
+            verdict: "block",
+            confidence: 0.91,
+            category: "toxicity",
+            reason: "test-provider",
+            latencyMs: 12,
+          };
+        },
+      },
+    });
+    const port = await app.start(0);
+
+    const response = await fetch(`http://127.0.0.1:${port}/v1/moderate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId: "m-42", text: "x" }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      messageId: "m-42",
+      verdict: "block",
+      confidence: 0.91,
+      category: "toxicity",
+      reason: "test-provider",
+      latencyMs: 12,
+    });
+  });
 });
 
 function onceOpen(ws) {
