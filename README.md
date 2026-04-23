@@ -2,6 +2,10 @@
 
 Bridge service and internal moderation dashboard foundation for Streamer.bot workflows.
 
+Companion extension repo:
+- `sai-moderation-streamerbot-extension`:
+  https://github.com/saitatter/sai-moderation-streamerbot-extension
+
 ## Goals
 
 - Receive chat events from Streamer.bot.
@@ -23,3 +27,4 @@ npm run check
 - Patch releases are also triggered for `refactor`, `ci`, and `chore`.
 
 See [Action Plan](docs/ACTION_PLAN.md) for implementation phases.
+See [Integration Contract](docs/INTEGRATION_CONTRACT.md) for extension/backend schema.
