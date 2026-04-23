@@ -21,6 +21,15 @@ npm install
 npm run check
 ```
 
+## OBS Dock Setup
+
+1. Start the service (default `:8787`).
+2. Open OBS -> `View` -> `Docks` -> `Custom Browser Docks...`.
+3. Add a new dock:
+   - Name: `SAI Moderation`
+   - URL: `http://127.0.0.1:8787/dashboard`
+4. Keep this dock open while streaming; it receives live moderation events from `ws?channel=dashboard`.
+
 ## Release Policy
 
 - Conventional Commits are required.

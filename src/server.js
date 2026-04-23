@@ -1,12 +1,19 @@
 import http from "node:http";
 import crypto from "node:crypto";
-import { URL } from "node:url";
+import path from "node:path";
+import { readFile } from "node:fs/promises";
+import { URL, fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { createEventHub } from "./eventHub.js";
 
 function json(res, statusCode, body) {
   res.writeHead(statusCode, { "Content-Type": "application/json" });
   res.end(JSON.stringify(body));
+}
+
+function html(res, statusCode, body) {
+  res.writeHead(statusCode, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(body);
 }
 
 async function readJsonBody(req) {
@@ -33,9 +40,28 @@ function toModerationResponse(payload) {
 export function createModerationServer({ logger = console } = {}) {
   const eventHub = createEventHub();
   const wss = new WebSocketServer({ noServer: true });
+  const currentDir = path.dirname(fileURLToPath(import.meta.url));
+  const dashboardPath = path.join(currentDir, "dashboard.html");
 
   const server = http.createServer(async (req, res) => {
     const parsed = new URL(req.url || "/", "http://localhost");
+
+    if (req.method === "GET" && parsed.pathname === "/") {
+      res.writeHead(302, { Location: "/dashboard" });
+      res.end();
+      return;
+    }
+
+    if (req.method === "GET" && parsed.pathname === "/dashboard") {
+      try {
+        const dashboardHtml = await readFile(dashboardPath, "utf8");
+        html(res, 200, dashboardHtml);
+      } catch (error) {
+        logger.error("Failed to load dashboard HTML", error);
+        json(res, 500, { error: "Dashboard unavailable" });
+      }
+      return;
+    }
 
     if (req.method === "GET" && parsed.pathname === "/healthz") {
       json(res, 200, { status: "ok", ...eventHub.getStats() });

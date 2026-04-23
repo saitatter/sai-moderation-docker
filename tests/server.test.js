@@ -23,6 +23,18 @@ describe("moderation server", () => {
     expect(body.status).toBe("ok");
   });
 
+  it("serves dashboard page", async () => {
+    app = createModerationServer({ logger: { info() {}, error() {} } });
+    const port = await app.start(0);
+
+    const response = await fetch(`http://127.0.0.1:${port}/dashboard`);
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(html).toContain("SAI Moderation Dashboard");
+  });
+
   it("publishes dashboard events to websocket subscribers", async () => {
     app = createModerationServer({ logger: { info() {}, error() {} } });
     const port = await app.start(0);
