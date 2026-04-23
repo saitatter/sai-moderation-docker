@@ -3,6 +3,7 @@
 Bridge service and internal moderation dashboard foundation for Streamer.bot workflows.
 
 Companion extension repo:
+
 - `sai-moderation-streamerbot-extension`:
   https://github.com/saitatter/sai-moderation-streamerbot-extension
 

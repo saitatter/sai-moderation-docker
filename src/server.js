@@ -1,0 +1,115 @@
+import http from "node:http";
+import crypto from "node:crypto";
+import { URL } from "node:url";
+import { WebSocketServer } from "ws";
+import { createEventHub } from "./eventHub.js";
+
+function json(res, statusCode, body) {
+  res.writeHead(statusCode, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(body));
+}
+
+async function readJsonBody(req) {
+  const chunks = [];
+  for await (const chunk of req) {
+    chunks.push(chunk);
+  }
+
+  if (chunks.length === 0) return {};
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+function toModerationResponse(payload) {
+  return {
+    messageId: payload?.messageId || crypto.randomUUID(),
+    verdict: "allow",
+    confidence: 1,
+    category: "safe",
+    reason: "placeholder-verdict",
+    latencyMs: 1,
+  };
+}
+
+export function createModerationServer({ logger = console } = {}) {
+  const eventHub = createEventHub();
+  const wss = new WebSocketServer({ noServer: true });
+
+  const server = http.createServer(async (req, res) => {
+    const parsed = new URL(req.url || "/", "http://localhost");
+
+    if (req.method === "GET" && parsed.pathname === "/healthz") {
+      json(res, 200, { status: "ok", ...eventHub.getStats() });
+      return;
+    }
+
+    if (req.method === "POST" && parsed.pathname === "/v1/moderate") {
+      try {
+        const body = await readJsonBody(req);
+        json(res, 200, toModerationResponse(body));
+      } catch (error) {
+        logger.error("Invalid moderation request body", error);
+        json(res, 400, { error: "Invalid JSON body" });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && parsed.pathname.startsWith("/v1/events/")) {
+      const channel = parsed.pathname.replace("/v1/events/", "");
+      if (!eventHub.isSupportedChannel(channel)) {
+        json(res, 404, { error: "Unsupported channel" });
+        return;
+      }
+
+      try {
+        const body = await readJsonBody(req);
+        const delivered = eventHub.publish(channel, body);
+        json(res, 202, { accepted: true, channel, delivered });
+      } catch (error) {
+        logger.error("Invalid event body", error);
+        json(res, 400, { error: "Invalid JSON body" });
+      }
+      return;
+    }
+
+    json(res, 404, { error: "Not found" });
+  });
+
+  server.on("upgrade", (req, socket, head) => {
+    const parsed = new URL(req.url || "/", "http://localhost");
+    if (parsed.pathname !== "/ws") {
+      socket.destroy();
+      return;
+    }
+
+    const channel = parsed.searchParams.get("channel") || "";
+    if (!eventHub.isSupportedChannel(channel)) {
+      socket.destroy();
+      return;
+    }
+
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      if (!eventHub.subscribe(channel, ws)) {
+        ws.close();
+      }
+    });
+  });
+
+  async function start(port = 8787) {
+    await new Promise((resolve) => server.listen(port, resolve));
+    const address = server.address();
+    const actualPort = typeof address === "object" && address ? address.port : port;
+    logger.info(`sai-moderation-docker listening on :${actualPort}`);
+    return actualPort;
+  }
+
+  async function stop() {
+    await new Promise((resolve) => server.close(resolve));
+  }
+
+  return {
+    start,
+    stop,
+    server,
+    eventHub,
+  };
+}
