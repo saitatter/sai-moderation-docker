@@ -35,6 +35,7 @@ export function createModerationServer({ logger = console, moderationProvider = 
   const provider = moderationProvider || createModerationProvider({ logger });
   const apiToken = process.env.API_TOKEN || "";
   const overrideForwardUrl = process.env.MANUAL_OVERRIDE_FORWARD_URL || "";
+  const forwardFlagsToOverlay = String(process.env.FORWARD_FLAGS_TO_OVERLAY || "false") === "true";
   const requestLimiter = createRequestLimiter({
     windowMs: Number.parseInt(process.env.RATE_LIMIT_WINDOW_MS || "10000", 10),
     maxRequests: Number.parseInt(process.env.RATE_LIMIT_MAX || "60", 10),
@@ -42,6 +43,7 @@ export function createModerationServer({ logger = console, moderationProvider = 
   const metrics = {
     moderationRequests: 0,
     moderationFailures: 0,
+    chatEventsProcessed: 0,
     eventPublishes: 0,
     overrideRequests: 0,
     overrideForwardFailures: 0,
@@ -69,6 +71,12 @@ export function createModerationServer({ logger = console, moderationProvider = 
   function denyRateLimited(res) {
     metrics.rateLimitedRequests += 1;
     json(res, 429, { error: "Too many requests" });
+  }
+
+  function shouldForwardToOverlay(verdict) {
+    if (verdict === "allow") return true;
+    if (verdict === "flag") return forwardFlagsToOverlay;
+    return false;
   }
 
   const server = http.createServer(async (req, res) => {
@@ -119,6 +127,71 @@ export function createModerationServer({ logger = console, moderationProvider = 
           metrics.moderationFailures += 1;
           logger.error("Moderation request failed", error);
           json(res, 500, { error: "Moderation failed" });
+        }
+      }
+      return;
+    }
+
+    if (req.method === "POST" && parsed.pathname === "/v1/chat-events") {
+      if (!isAuthorized(req)) {
+        denyUnauthorized(res);
+        return;
+      }
+      if (!requestLimiter.isAllowed(getClientKey(req))) {
+        denyRateLimited(res);
+        return;
+      }
+
+      try {
+        metrics.chatEventsProcessed += 1;
+        const body = await readJsonBody(req);
+        const moderationResponse = await provider.moderate(body);
+
+        const dashboardEvent = {
+          eventType: "moderation.result",
+          messageId: moderationResponse.messageId,
+          platform: body?.platform || "unknown",
+          username: body?.username || "unknown",
+          text: body?.text || "",
+          verdict: moderationResponse.verdict,
+          confidence: moderationResponse.confidence,
+          category: moderationResponse.category,
+          reason: moderationResponse.reason,
+          receivedAt: body?.receivedAt || new Date().toISOString(),
+        };
+
+        const dashboardDelivered = eventHub.publish("dashboard", dashboardEvent);
+        metrics.eventPublishes += 1;
+
+        let overlayDelivered = 0;
+        if (shouldForwardToOverlay(moderationResponse.verdict)) {
+          overlayDelivered = eventHub.publish("overlay", {
+            eventType: "overlay.message",
+            messageId: moderationResponse.messageId,
+            platform: body?.platform || "unknown",
+            username: body?.username || "unknown",
+            text: body?.text || "",
+            verdict: moderationResponse.verdict,
+          });
+          metrics.eventPublishes += 1;
+        }
+
+        json(res, 202, {
+          accepted: true,
+          moderation: moderationResponse,
+          delivered: {
+            dashboard: dashboardDelivered,
+            overlay: overlayDelivered,
+          },
+        });
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          logger.error("Invalid chat event body", error);
+          json(res, 400, { error: "Invalid JSON body" });
+        } else {
+          metrics.moderationFailures += 1;
+          logger.error("Chat event moderation failed", error);
+          json(res, 500, { error: "Chat event processing failed" });
         }
       }
       return;

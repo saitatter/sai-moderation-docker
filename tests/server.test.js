@@ -15,11 +15,13 @@ describe("moderation server", () => {
   const previousApiToken = process.env.API_TOKEN;
   const previousRateLimitMax = process.env.RATE_LIMIT_MAX;
   const previousRateLimitWindowMs = process.env.RATE_LIMIT_WINDOW_MS;
+  const previousForwardFlagsToOverlay = process.env.FORWARD_FLAGS_TO_OVERLAY;
 
   afterEach(() => {
     resetEnv("API_TOKEN", previousApiToken);
     resetEnv("RATE_LIMIT_MAX", previousRateLimitMax);
     resetEnv("RATE_LIMIT_WINDOW_MS", previousRateLimitWindowMs);
+    resetEnv("FORWARD_FLAGS_TO_OVERLAY", previousForwardFlagsToOverlay);
   });
 
   it("returns health payload", async () => {
@@ -163,6 +165,59 @@ describe("moderation server", () => {
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(429);
+  });
+
+  it("processes /v1/chat-events and publishes dashboard plus overlay for allow", async () => {
+    process.env.FORWARD_FLAGS_TO_OVERLAY = "false";
+    app = createModerationServer({
+      logger: { info() {}, error() {} },
+      moderationProvider: {
+        async moderate(payload) {
+          return {
+            messageId: payload.messageId || "m-chat",
+            verdict: "allow",
+            confidence: 0.88,
+            category: "safe",
+            reason: "ok",
+            latencyMs: 6,
+          };
+        },
+      },
+    });
+    const port = await app.start(0);
+
+    const dashboardWs = new WebSocket(`ws://127.0.0.1:${port}/ws?channel=dashboard`);
+    const overlayWs = new WebSocket(`ws://127.0.0.1:${port}/ws?channel=overlay`);
+    await onceOpen(dashboardWs);
+    await onceOpen(overlayWs);
+
+    const dashboardMessage = onceMessage(dashboardWs);
+    const overlayMessage = onceMessage(overlayWs);
+
+    const response = await fetch(`http://127.0.0.1:${port}/v1/chat-events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messageId: "m-chat",
+        platform: "Twitch",
+        username: "alice",
+        text: "hello",
+        receivedAt: "2026-04-24T10:00:00Z",
+      }),
+    });
+    const body = await response.json();
+    const dashboardPayload = await dashboardMessage;
+    const overlayPayload = await overlayMessage;
+
+    expect(response.status).toBe(202);
+    expect(body.accepted).toBe(true);
+    expect(dashboardPayload.eventType).toBe("moderation.result");
+    expect(dashboardPayload.verdict).toBe("allow");
+    expect(overlayPayload.eventType).toBe("overlay.message");
+    expect(overlayPayload.verdict).toBe("allow");
+
+    dashboardWs.close();
+    overlayWs.close();
   });
 });
 

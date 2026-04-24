@@ -44,6 +44,34 @@ npm run check
 
 If `LLM_PROVIDER` is not set, the service uses the `mock` provider.
 
+## Single-Call Chat Ingestion
+
+For minimal Streamer.bot wiring, use one endpoint:
+
+- `POST /v1/chat-events`
+
+It performs:
+
+1. moderation (LLM provider)
+2. publish to dashboard channel (`moderation.result`)
+3. publish to overlay channel (`overlay.message`) when verdict is allowed (and optionally flagged)
+
+Set `FORWARD_FLAGS_TO_OVERLAY=true` to also forward flagged messages.
+
+Example payload:
+
+```json
+{
+  "messageId": "msg-123",
+  "platform": "Twitch",
+  "channelId": "chan-1",
+  "userId": "user-7",
+  "username": "viewer_name",
+  "text": "message body",
+  "receivedAt": "2026-04-24T18:00:00Z"
+}
+```
+
 ## OBS Dock Setup
 
 1. Start the service (default `:8787`).
