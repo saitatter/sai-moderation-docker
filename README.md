@@ -17,8 +17,15 @@ Companion extension repo:
 ## Development
 
 ```bash
-npm install
-npm run check
+python -m venv .venv
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+# macOS/Linux
+# source .venv/bin/activate
+
+pip install -r requirements-dev.txt
+pytest
+uvicorn app.main:app --host 0.0.0.0 --port 8787 --reload
 ```
 
 ## Local LLM (Ollama)
@@ -39,7 +46,7 @@ export LLM_PROVIDER=ollama
 export OLLAMA_BASE_URL=http://127.0.0.1:11434
 export OLLAMA_MODEL=qwen2.5:7b
 export LLM_TIMEOUT_MS=6000
-npm run check
+uvicorn app.main:app --host 0.0.0.0 --port 8787
 ```
 
 If `LLM_PROVIDER` is not set, the service uses the `mock` provider.
@@ -91,7 +98,7 @@ The dashboard supports manual actions (`Approve`, `Block`, `False Positive`) and
 
 Optional environment variables:
 
-- `API_TOKEN`: require `Authorization: Bearer <token>` for `POST /v1/moderate`, `POST /v1/events/*`, `POST /v1/overrides`.
+- `API_TOKEN`: require `Authorization: Bearer <token>` for `POST /v1/moderate`, `POST /v1/chat-events`, `POST /v1/events/*`, `POST /v1/overrides`; also required as `?token=` for `GET /dashboard` usage with secured WS.
 - `RATE_LIMIT_WINDOW_MS` (default: `10000`)
 - `RATE_LIMIT_MAX` (default: `60`) for `/v1/moderate` requests per client IP and window.
 
