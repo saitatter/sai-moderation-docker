@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SAI Moderation Dashboard</title>
+    <style>
+      :root {
+        --bg: #0f1220;
+        --panel: #191e33;
+        --line: #2a3358;
+        --text: #e9eeff;
+        --muted: #a4b0d8;
+        --ok: #2bc48a;
+        --warn: #ffb547;
+        --bad: #ff5d7a;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Tahoma, sans-serif;
+        background: radial-gradient(1200px 700px at 20% -20%, #233063, var(--bg));
+        color: var(--text);
+      }
+
+      .wrap {
+        padding: 14px;
+        min-height: 100vh;
+      }
+
+      .top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 10px;
+        flex-wrap: wrap;
+      }
+
+      .toolbar input,
+      .toolbar select {
+        border: 1px solid var(--line);
+        background: rgba(20, 27, 49, 0.8);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 6px 8px;
+        font-size: 12px;
+      }
+
+      .stats {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 10px;
+        flex-wrap: wrap;
+      }
+
+      .stat {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 4px 8px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .title {
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+      }
+
+      .status {
+        font-size: 12px;
+        color: var(--muted);
+        padding: 6px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(16, 20, 35, 0.6);
+      }
+
+      .status[data-state="connected"] {
+        color: var(--ok);
+      }
+
+      .status[data-state="closed"] {
+        color: var(--bad);
+      }
+
+      .list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .item {
+        border: 1px solid var(--line);
+        background: linear-gradient(180deg, rgba(34, 43, 75, 0.6), rgba(23, 29, 50, 0.7));
+        border-radius: 10px;
+        padding: 10px;
+      }
+
+      .meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .user {
+        font-weight: 600;
+        color: var(--text);
+        margin: 6px 0;
+      }
+
+      .text {
+        font-size: 13px;
+        line-height: 1.4;
+      }
+
+      .verdict {
+        font-size: 11px;
+        font-weight: 700;
+        padding: 4px 8px;
+        border-radius: 999px;
+        border: 1px solid transparent;
+      }
+
+      .verdict.allow {
+        color: var(--ok);
+        border-color: rgba(43, 196, 138, 0.4);
+        background: rgba(43, 196, 138, 0.1);
+      }
+
+      .verdict.flag {
+        color: var(--warn);
+        border-color: rgba(255, 181, 71, 0.4);
+        background: rgba(255, 181, 71, 0.1);
+      }
+
+      .verdict.block {
+        color: var(--bad);
+        border-color: rgba(255, 93, 122, 0.4);
+        background: rgba(255, 93, 122, 0.1);
+      }
+
+      .actions {
+        display: flex;
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .actions button {
+        border: 1px solid var(--line);
+        background: rgba(20, 27, 49, 0.8);
+        color: var(--text);
+        border-radius: 8px;
+        font-size: 11px;
+        padding: 5px 8px;
+        cursor: pointer;
+      }
+
+      .actions button:hover {
+        border-color: #4d5d97;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <div class="title">SAI Moderation Dashboard</div>
+        <div id="status" class="status" data-state="connecting">Connecting...</div>
+      </div>
+      <div class="toolbar">
+        <select id="verdictFilter">
+          <option value="all">All verdicts</option>
+          <option value="allow">Allow</option>
+          <option value="flag">Flag</option>
+          <option value="block">Block</option>
+        </select>
+        <input id="searchFilter" type="text" placeholder="Search user/text" />
+      </div>
+      <div class="stats">
+        <div id="statTotal" class="stat">Total: 0</div>
+        <div id="statAllow" class="stat">Allow: 0</div>
+        <div id="statFlag" class="stat">Flag: 0</div>
+        <div id="statBlock" class="stat">Block: 0</div>
+      </div>
+      <div id="list" class="list"></div>
+    </div>
+
+    <script>
+      const statusEl = document.getElementById("status");
+      const listEl = document.getElementById("list");
+      const verdictFilterEl = document.getElementById("verdictFilter");
+      const searchFilterEl = document.getElementById("searchFilter");
+      const statTotalEl = document.getElementById("statTotal");
+      const statAllowEl = document.getElementById("statAllow");
+      const statFlagEl = document.getElementById("statFlag");
+      const statBlockEl = document.getElementById("statBlock");
+      const maxItems = 100;
+      const urlParams = new URLSearchParams(window.location.search);
+      const apiToken = urlParams.get("token") || "";
+      const operatorId = urlParams.get("operator") || "dashboard-mod";
+      const entries = [];
+
+      function setStatus(text, state) {
+        statusEl.textContent = text;
+        statusEl.dataset.state = state;
+      }
+
+      function formatTime(value) {
+        const date = value ? new Date(value) : new Date();
+        return date.toLocaleTimeString();
+      }
+
+      async function requestOverride(payload, action) {
+        const reason = window.prompt(`Reason for ${action} on #${payload.messageId}`);
+        if (!reason || !reason.trim()) return;
+
+        try {
+          const response = await fetch("/v1/overrides", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}),
+            },
+            body: JSON.stringify({
+              messageId: payload.messageId,
+              action,
+              operatorId,
+              reason: reason.trim(),
+            }),
+          });
+
+          if (!response.ok) {
+            setStatus(`Override failed (${response.status})`, "closed");
+            return;
+          }
+          setStatus(`Override sent: ${action}`, "connected");
+        } catch {
+          setStatus("Override failed (network)", "closed");
+        }
+      }
+
+      function updateStats() {
+        let allow = 0;
+        let flag = 0;
+        let block = 0;
+
+        entries.forEach((entry) => {
+          const verdict = String(entry.verdict || "").toLowerCase();
+          if (verdict === "allow") allow += 1;
+          if (verdict === "flag") flag += 1;
+          if (verdict === "block") block += 1;
+        });
+
+        statTotalEl.textContent = `Total: ${entries.length}`;
+        statAllowEl.textContent = `Allow: ${allow}`;
+        statFlagEl.textContent = `Flag: ${flag}`;
+        statBlockEl.textContent = `Block: ${block}`;
+      }
+
+      function renderList() {
+        listEl.innerHTML = "";
+        const verdictFilter = verdictFilterEl.value;
+        const searchFilter = searchFilterEl.value.trim().toLowerCase();
+
+        entries
+          .filter((entry) => {
+            if (verdictFilter !== "all" && String(entry.verdict || "").toLowerCase() !== verdictFilter) {
+              return false;
+            }
+            if (!searchFilter) return true;
+            const haystack = `${entry.username || ""} ${entry.text || ""} ${entry.reason || ""}`.toLowerCase();
+            return haystack.includes(searchFilter);
+          })
+          .forEach((payload) => {
+            const item = document.createElement("article");
+            item.className = "item";
+
+            const verdict = String(payload.verdict || "flag").toLowerCase();
+            const eventType = payload.eventType || "moderation.result";
+            const username = payload.username || payload.operatorId || "unknown";
+            const text = payload.text || payload.reason || "(no text)";
+            const messageId = payload.messageId || "n/a";
+
+            item.innerHTML = `
+              <div class="meta">
+                <span>${formatTime(payload.receivedAt)}</span>
+                <span>#${messageId}</span>
+              </div>
+              <div class="user">${username}</div>
+              <div class="text">${text}</div>
+              <div class="meta" style="margin-top:8px;">
+                <span>${eventType}</span>
+                <span class="verdict ${verdict}">${verdict}</span>
+              </div>
+            `;
+
+            if (eventType === "moderation.result" && messageId !== "n/a") {
+              const actions = document.createElement("div");
+              actions.className = "actions";
+              actions.innerHTML = `
+                <button data-action="approve">Approve</button>
+                <button data-action="block">Block</button>
+                <button data-action="falsePositive">False Positive</button>
+              `;
+              actions.addEventListener("click", (event) => {
+                const button = event.target.closest("button[data-action]");
+                if (!button) return;
+                requestOverride(payload, button.dataset.action);
+              });
+              item.appendChild(actions);
+            }
+
+            listEl.appendChild(item);
+          });
+      }
+
+      function addItem(payload) {
+        entries.unshift(payload);
+        while (entries.length > maxItems) entries.pop();
+        updateStats();
+        renderList();
+      }
+
+      function connect() {
+        const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+        const tokenParam = apiToken ? `&token=${encodeURIComponent(apiToken)}` : "";
+        const socket = new WebSocket(
+          `${protocol}//${location.host}/ws?channel=dashboard${tokenParam}`,
+        );
+
+        setStatus("Connecting...", "connecting");
+
+        socket.addEventListener("open", () => {
+          setStatus("Live", "connected");
+        });
+
+        socket.addEventListener("message", (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            addItem(payload);
+          } catch {
+            // ignore malformed messages
+          }
+        });
+
+        socket.addEventListener("close", () => {
+          setStatus("Disconnected (retrying)", "closed");
+          setTimeout(connect, 1500);
+        });
+      }
+
+      verdictFilterEl.addEventListener("change", renderList);
+      searchFilterEl.addEventListener("input", renderList);
+      connect();
+    </script>
+  </body>
+</html>

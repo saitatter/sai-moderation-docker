@@ -1,6 +1,7 @@
 {
   "name": "sai-moderation-docker",
   "private": true,
+  "type": "module",
   "version": "0.0.0-development",
   "description": "Streamer.bot moderation bridge with Docker-first development workflow.",
   "scripts": {
@@ -9,6 +10,9 @@
     "format:check": "prettier --check \"src/**/*.js\" \"tests/**/*.js\" \"docs/**/*.md\" \"*.md\" \".github/**/*.yml\"",
     "test": "vitest run",
     "check": "npm run lint && npm run format:check && npm run test"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@semantic-release/git": "^10.0.1",
@@ -20,4 +24,3 @@
     "vitest": "^2.1.9"
   }
 }
-

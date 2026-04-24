@@ -1,6 +1,7 @@
 # Integration Contract
 
 This document defines the contract between:
+
 - `sai-moderation-streamerbot-extension` (producer/bridge)
 - `sai-moderation-docker` (moderation backend)
 
@@ -34,6 +35,7 @@ This document defines the contract between:
 ```
 
 Allowed `verdict` values:
+
 - `allow`
 - `flag`
 - `block`
@@ -58,6 +60,7 @@ Allowed `verdict` values:
 ## 4) Overlay Event: Extension -> Overlay Channel
 
 Overlay receives:
+
 - all `allow`
 - optional `flag` based on extension config
 - never `block`
@@ -77,4 +80,3 @@ Overlay receives:
 
 - Contract version is tied to repository release tags.
 - Breaking changes must increment major version and be documented in release notes.
-
