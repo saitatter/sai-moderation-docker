@@ -1,20 +1,22 @@
 # sai-moderation-docker
 
-Bridge service and internal moderation dashboard foundation for Streamer.bot workflows.
+Python FastAPI backend for chat moderation + OBS-ready web dashboard.
 
 Companion extension repo:
 
 - `sai-moderation-streamerbot-extension`:
   https://github.com/saitatter/sai-moderation-streamerbot-extension
 
-## Goals
+## What It Does
 
-- Receive chat events from Streamer.bot.
-- Forward messages to external moderation/LLM service.
-- Publish moderation verdicts to overlay and moderator dashboard.
-- Keep release and collaboration standards aligned with `sai-chat-overlay`.
+- Receives chat events from Streamer.bot (or any HTTP client).
+- Runs moderation using a provider (`mock` or local `ollama`).
+- Publishes verdicts to WebSocket channels:
+  - `dashboard`
+  - `overlay`
+- Serves a web dashboard for OBS dock (`/dashboard`) with manual override actions.
 
-## Development
+## Quick Start
 
 ```bash
 python -m venv .venv
@@ -28,42 +30,49 @@ pytest
 uvicorn app.main:app --host 0.0.0.0 --port 8787 --reload
 ```
 
+Health check:
+
+- `GET http://127.0.0.1:8787/healthz`
+
+Dashboard:
+
+- `http://127.0.0.1:8787/dashboard`
+
 ## Local LLM (Ollama)
 
-`sai-moderation-docker` can call a local Ollama model for `/v1/moderate`.
+By default the backend uses `mock` moderation.
 
-Environment variables:
-
-- `LLM_PROVIDER=ollama`
-- `OLLAMA_BASE_URL=http://127.0.0.1:11434`
-- `OLLAMA_MODEL=qwen2.5:7b`
-- `LLM_TIMEOUT_MS=6000`
-
-Example:
+To use Ollama:
 
 ```bash
-export LLM_PROVIDER=ollama
-export OLLAMA_BASE_URL=http://127.0.0.1:11434
-export OLLAMA_MODEL=qwen2.5:7b
-export LLM_TIMEOUT_MS=6000
+ollama pull qwen2.5:7b
+```
+
+Set environment variables:
+
+```bash
+# PowerShell
+$env:LLM_PROVIDER="ollama"
+$env:OLLAMA_BASE_URL="http://127.0.0.1:11434"
+$env:OLLAMA_MODEL="qwen2.5:7b"
+$env:LLM_TIMEOUT_MS="6000"
+
 uvicorn app.main:app --host 0.0.0.0 --port 8787
 ```
 
-If `LLM_PROVIDER` is not set, the service uses the `mock` provider.
+## Minimal Streamer.bot Integration
 
-## Single-Call Chat Ingestion
-
-For minimal Streamer.bot wiring, use one endpoint:
+Use one endpoint from your chat action:
 
 - `POST /v1/chat-events`
 
-It performs:
+This endpoint:
 
-1. moderation (LLM provider)
-2. publish to dashboard channel (`moderation.result`)
-3. publish to overlay channel (`overlay.message`) when verdict is allowed (and optionally flagged)
+1. moderates message text
+2. publishes `moderation.result` to dashboard channel
+3. publishes `overlay.message` to overlay channel when verdict should pass through
 
-Set `FORWARD_FLAGS_TO_OVERLAY=true` to also forward flagged messages.
+Set `FORWARD_FLAGS_TO_OVERLAY=true` if you also want flagged messages in overlay.
 
 Example payload:
 
@@ -79,28 +88,46 @@ Example payload:
 }
 ```
 
+## API Endpoints
+
+- `GET /healthz`
+- `GET /dashboard`
+- `POST /v1/moderate`
+- `POST /v1/chat-events`
+- `POST /v1/events/{channel}` (`dashboard` or `overlay`)
+- `POST /v1/overrides`
+- `WS /ws?channel=dashboard|overlay`
+
 ## OBS Dock Setup
 
-1. Start the service (default `:8787`).
-2. Open OBS -> `View` -> `Docks` -> `Custom Browser Docks...`.
-3. Add a new dock:
+1. Open OBS -> `View` -> `Docks` -> `Custom Browser Docks...`
+2. Add:
    - Name: `SAI Moderation`
    - URL: `http://127.0.0.1:8787/dashboard`
-   - If `API_TOKEN` is enabled: `http://127.0.0.1:8787/dashboard?token=YOUR_TOKEN&operator=your_mod_name`
-4. Keep this dock open while streaming; it receives live moderation events from `ws?channel=dashboard`.
+3. If auth is enabled, include query params:
+   - `http://127.0.0.1:8787/dashboard?token=YOUR_TOKEN&operator=your_mod_name`
 
-The dashboard supports manual actions (`Approve`, `Block`, `False Positive`) and sends them to:
+Dashboard supports:
 
-- `POST /v1/overrides`
-- optional forward callback to extension if `MANUAL_OVERRIDE_FORWARD_URL` is set.
+- filters/search
+- live verdict feed
+- manual actions: `Approve`, `Block`, `False Positive`
 
 ## Security and Rate Limits
 
 Optional environment variables:
 
-- `API_TOKEN`: require `Authorization: Bearer <token>` for `POST /v1/moderate`, `POST /v1/chat-events`, `POST /v1/events/*`, `POST /v1/overrides`; also required as `?token=` for `GET /dashboard` usage with secured WS.
+- `API_TOKEN`:
+  Require `Authorization: Bearer <token>` for:
+  - `POST /v1/moderate`
+  - `POST /v1/chat-events`
+  - `POST /v1/events/*`
+  - `POST /v1/overrides`
+  For WebSocket dashboard, use `?token=` query param.
 - `RATE_LIMIT_WINDOW_MS` (default: `10000`)
-- `RATE_LIMIT_MAX` (default: `60`) for `/v1/moderate` requests per client IP and window.
+- `RATE_LIMIT_MAX` (default: `60`) for `/v1/moderate` and `/v1/chat-events` per client IP/window.
+- `MANUAL_OVERRIDE_FORWARD_URL`:
+  Optional callback target for forwarded override requests.
 
 ## Release Policy
 
