@@ -277,11 +277,15 @@
 
         entries
           .filter((entry) => {
-            if (verdictFilter !== "all" && String(entry.verdict || "").toLowerCase() !== verdictFilter) {
+            if (
+              verdictFilter !== "all" &&
+              String(entry.verdict || "").toLowerCase() !== verdictFilter
+            ) {
               return false;
             }
             if (!searchFilter) return true;
-            const haystack = `${entry.username || ""} ${entry.text || ""} ${entry.reason || ""}`.toLowerCase();
+            const haystack =
+              `${entry.username || ""} ${entry.text || ""} ${entry.reason || ""}`.toLowerCase();
             return haystack.includes(searchFilter);
           })
           .forEach((payload) => {
@@ -327,11 +331,34 @@
           });
       }
 
+      function entryKey(payload) {
+        return `${payload.eventType || "event"}:${payload.messageId || payload.requestedAt || Date.now()}`;
+      }
+
       function addItem(payload) {
+        const key = entryKey(payload);
+        const existingIndex = entries.findIndex((entry) => entryKey(entry) === key);
+        if (existingIndex >= 0) entries.splice(existingIndex, 1);
+
         entries.unshift(payload);
         while (entries.length > maxItems) entries.pop();
         updateStats();
         renderList();
+      }
+
+      async function loadInitialQueue() {
+        try {
+          const response = await fetch("/api/moderation/queue", {
+            headers: {
+              ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}),
+            },
+          });
+          if (!response.ok) return;
+          const queue = await response.json();
+          [...(queue.latest || [])].reverse().forEach(addItem);
+        } catch {
+          // Live websocket updates remain the primary path.
+        }
       }
 
       function connect() {
@@ -364,6 +391,7 @@
 
       verdictFilterEl.addEventListener("change", renderList);
       searchFilterEl.addEventListener("input", renderList);
+      loadInitialQueue();
       connect();
     </script>
   </body>

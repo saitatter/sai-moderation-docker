@@ -70,7 +70,8 @@ This endpoint:
 
 1. moderates message text
 2. publishes `moderation.result` to dashboard channel
-3. publishes `overlay.message` to overlay channel when verdict should pass through
+3. publishes `overlay.message` with normalized `chat.message` fields to overlay
+   channel when verdict should pass through
 
 Set `FORWARD_FLAGS_TO_OVERLAY=true` if you also want flagged messages in overlay.
 
@@ -92,6 +93,7 @@ Example payload:
 
 - `GET /healthz`
 - `GET /dashboard`
+- `GET /api/moderation/queue`
 - `POST /v1/moderate`
 - `POST /v1/chat-events`
 - `POST /v1/events/{channel}` (`dashboard` or `overlay`)
@@ -111,7 +113,17 @@ Dashboard supports:
 
 - filters/search
 - live verdict feed
+- initial queue restore from `/api/moderation/queue`
 - manual actions: `Approve`, `Block`, `False Positive`
+
+## Chat Overlay Setup
+
+Use `sai-chat-overlay` in moderation mode so OBS renders only messages approved
+by this backend:
+
+```text
+http://localhost:8080/?eventSource=moderation&overlayWsUrl=ws%3A%2F%2Flocalhost%3A8787%2Fws%3Fchannel%3Doverlay
+```
 
 ## Security and Rate Limits
 
@@ -123,7 +135,7 @@ Optional environment variables:
   - `POST /v1/chat-events`
   - `POST /v1/events/*`
   - `POST /v1/overrides`
-  For WebSocket dashboard, use `?token=` query param.
+    For WebSocket dashboard, use `?token=` query param.
 - `RATE_LIMIT_WINDOW_MS` (default: `10000`)
 - `RATE_LIMIT_MAX` (default: `60`) for `/v1/moderate` and `/v1/chat-events` per client IP/window.
 - `MANUAL_OVERRIDE_FORWARD_URL`:

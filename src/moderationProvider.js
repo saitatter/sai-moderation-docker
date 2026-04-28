@@ -22,7 +22,9 @@ function extractFirstJsonObject(input) {
   const trimmed = input.trim();
   try {
     return JSON.parse(trimmed);
-  } catch {}
+  } catch {
+    // Some providers wrap JSON with prose; fall back to extracting the first object.
+  }
 
   const start = trimmed.indexOf("{");
   const end = trimmed.lastIndexOf("}");
@@ -42,13 +44,7 @@ function normalizeVerdict(value) {
   return "flag";
 }
 
-function createOllamaProvider({
-  baseUrl,
-  model,
-  timeoutMs = 6000,
-  fetchImpl = fetch,
-  logger = console,
-}) {
+function createOllamaProvider({ baseUrl, model, timeoutMs = 6000, fetchImpl = fetch }) {
   const endpoint = `${baseUrl.replace(/\/$/, "")}/api/generate`;
 
   return {
@@ -120,7 +116,7 @@ export function createModerationProvider({
     logger.info(
       `Using ollama moderation provider (${model}) at ${baseUrl}, timeout ${timeoutMs}ms`,
     );
-    return createOllamaProvider({ baseUrl, model, timeoutMs, fetchImpl, logger });
+    return createOllamaProvider({ baseUrl, model, timeoutMs, fetchImpl });
   }
 
   logger.info("Using mock moderation provider.");

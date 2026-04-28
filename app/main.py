@@ -26,6 +26,54 @@ def _should_forward_to_overlay(verdict: str, forward_flags: bool) -> bool:
     return False
 
 
+def _platform_source(platform: Any) -> str:
+    normalized = str(platform or "unknown").strip().lower()
+    if normalized == "youtube":
+        return "youtube"
+    if normalized == "twitch":
+        return "twitch"
+    return normalized or "unknown"
+
+
+def _build_overlay_chat_event(payload: dict[str, Any], moderation: dict[str, Any]) -> dict[str, Any]:
+    message_id = str(moderation.get("messageId") or payload.get("messageId") or "")
+    username = str(payload.get("username") or "unknown")
+    text = str(payload.get("text") or "")
+    platform = str(payload.get("platform") or "unknown")
+    received_at = str(payload.get("receivedAt") or _utc_now_iso())
+
+    return {
+        "eventType": "overlay.message",
+        "messageId": message_id,
+        "platform": platform,
+        "username": username,
+        "text": text,
+        "verdict": moderation.get("verdict", "allow"),
+        "version": 1,
+        "id": message_id,
+        "type": "chat.message",
+        "source": _platform_source(platform),
+        "status": "approved",
+        "createdAt": received_at,
+        "receivedAt": received_at,
+        "actor": {
+            "id": str(payload.get("userId") or ""),
+            "name": username,
+            "displayName": username,
+            "badges": payload.get("badges") if isinstance(payload.get("badges"), list) else [],
+        },
+        "payload": {
+            "message": text,
+            "emotes": payload.get("emotes") if isinstance(payload.get("emotes"), list) else [],
+            "isAction": bool(payload.get("isAction", False)),
+            "isFirstMessage": bool(payload.get("isFirstMessage", False)),
+        },
+        "display": {
+            "priority": "normal",
+        },
+    }
+
+
 def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI:
     app = FastAPI(title="SAI Moderation Docker", version="0.1.0")
 
@@ -48,6 +96,17 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
         "overrideForwardFailures": 0,
         "unauthorizedRequests": 0,
         "rateLimitedRequests": 0,
+        "approvedMessages": 0,
+        "blockedMessages": 0,
+        "flaggedMessages": 0,
+        "manualOverlayPublishes": 0,
+    }
+    moderation_state: dict[str, Any] = {
+        "latest": [],
+        "pending": [],
+        "approved": [],
+        "rejected": [],
+        "messagesById": {},
     }
 
     dashboard_path = Path(__file__).with_name("dashboard.html")
@@ -74,6 +133,31 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
         metrics["rateLimitedRequests"] += 1
         raise HTTPException(status_code=429, detail="Too many requests")
 
+    def _remember_event(dashboard_event: dict[str, Any], overlay_event: dict[str, Any]) -> None:
+        message_id = dashboard_event.get("messageId")
+        verdict = str(dashboard_event.get("verdict", "")).lower()
+
+        moderation_state["latest"].insert(0, dashboard_event)
+        moderation_state["latest"] = moderation_state["latest"][:100]
+        if message_id:
+            moderation_state["messagesById"][message_id] = {
+                "dashboard": dashboard_event,
+                "overlay": overlay_event,
+            }
+
+        if verdict == "allow":
+            moderation_state["approved"].insert(0, dashboard_event)
+            moderation_state["approved"] = moderation_state["approved"][:100]
+            metrics["approvedMessages"] += 1
+        elif verdict == "block":
+            moderation_state["rejected"].insert(0, dashboard_event)
+            moderation_state["rejected"] = moderation_state["rejected"][:100]
+            metrics["blockedMessages"] += 1
+        elif verdict == "flag":
+            moderation_state["pending"].insert(0, dashboard_event)
+            moderation_state["pending"] = moderation_state["pending"][:100]
+            metrics["flaggedMessages"] += 1
+
     @app.get("/")
     async def root() -> RedirectResponse:
         return RedirectResponse(url="/dashboard", status_code=302)
@@ -92,6 +176,24 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
                 **(await event_hub.get_stats()),
                 "metrics": metrics,
                 "provider": provider.name,
+                "queues": {
+                    "latest": len(moderation_state["latest"]),
+                    "pending": len(moderation_state["pending"]),
+                    "approved": len(moderation_state["approved"]),
+                    "rejected": len(moderation_state["rejected"]),
+                },
+            }
+        )
+
+    @app.get("/api/moderation/queue")
+    async def moderation_queue(request: Request) -> JSONResponse:
+        _ensure_authorized(request)
+        return JSONResponse(
+            {
+                "latest": moderation_state["latest"],
+                "pending": moderation_state["pending"],
+                "approved": moderation_state["approved"],
+                "rejected": moderation_state["rejected"],
             }
         )
 
@@ -133,22 +235,14 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
                 "reason": moderation.get("reason", "model-response"),
                 "receivedAt": payload.get("receivedAt") or _utc_now_iso(),
             }
+            overlay_event = _build_overlay_chat_event(payload, moderation)
+            _remember_event(dashboard_event, overlay_event)
             dashboard_delivered = await event_hub.publish("dashboard", dashboard_event)
             metrics["eventPublishes"] += 1
 
             overlay_delivered = 0
             if _should_forward_to_overlay(moderation["verdict"], forward_flags_to_overlay):
-                overlay_delivered = await event_hub.publish(
-                    "overlay",
-                    {
-                        "eventType": "overlay.message",
-                        "messageId": moderation["messageId"],
-                        "platform": payload.get("platform", "unknown"),
-                        "username": payload.get("username", "unknown"),
-                        "text": payload.get("text", ""),
-                        "verdict": moderation["verdict"],
-                    },
-                )
+                overlay_delivered = await event_hub.publish("overlay", overlay_event)
                 metrics["eventPublishes"] += 1
 
             return JSONResponse(
@@ -207,6 +301,20 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
                 },
             )
             metrics["eventPublishes"] += 1
+
+            if action in {"approve", "falsePositive"} and message_id in moderation_state["messagesById"]:
+                overlay_event = dict(moderation_state["messagesById"][message_id]["overlay"])
+                overlay_event["verdict"] = "allow"
+                overlay_event["status"] = "approved"
+                overlay_event["manualOverride"] = {
+                    "action": action,
+                    "operatorId": operator_id,
+                    "reason": reason,
+                    "requestedAt": _utc_now_iso(),
+                }
+                await event_hub.publish("overlay", overlay_event)
+                metrics["eventPublishes"] += 1
+                metrics["manualOverlayPublishes"] += 1
 
             if override_forward_url:
                 headers = {"Content-Type": "application/json"}
