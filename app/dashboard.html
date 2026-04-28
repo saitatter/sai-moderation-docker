@@ -172,6 +172,45 @@
       .actions button:hover {
         border-color: #4d5d97;
       }
+
+      .scene-panel {
+        border: 1px solid var(--line);
+        background: rgba(20, 27, 49, 0.62);
+        border-radius: 10px;
+        padding: 10px;
+        margin-bottom: 10px;
+      }
+
+      .scene-panel h2 {
+        margin: 0 0 8px;
+        font-size: 13px;
+      }
+
+      .scene-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+      }
+
+      .scene-grid input,
+      .scene-grid select,
+      .scene-grid button {
+        min-width: 0;
+        border: 1px solid var(--line);
+        background: rgba(20, 27, 49, 0.8);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 6px 8px;
+        font-size: 12px;
+      }
+
+      .scene-grid button {
+        cursor: pointer;
+      }
+
+      .scene-grid .wide {
+        grid-column: 1 / -1;
+      }
     </style>
   </head>
   <body>
@@ -195,6 +234,29 @@
         <div id="statFlag" class="stat">Flag: 0</div>
         <div id="statBlock" class="stat">Block: 0</div>
       </div>
+      <section class="scene-panel">
+        <h2>Scene Controls</h2>
+        <div class="scene-grid">
+          <input id="sceneInstance" value="main" aria-label="Scene instance" />
+          <select id="scenePreset" aria-label="Scene preset">
+            <option value="starting-soon">Starting Soon</option>
+            <option value="brb">BRB</option>
+            <option value="ending">Ending</option>
+          </select>
+          <input id="sceneTitle" class="wide" value="Starting Soon" aria-label="Scene title" />
+          <input
+            id="sceneSubtitle"
+            class="wide"
+            value="Grab a drink and settle in."
+            aria-label="Scene subtitle"
+          />
+          <input id="sceneAccent" type="color" value="#9146FF" aria-label="Accent color" />
+          <input id="sceneSecondary" type="color" value="#00D1FF" aria-label="Secondary color" />
+          <button id="sceneBegin">Begin</button>
+          <button id="sceneUpdate">Update</button>
+          <button id="sceneEnd" class="wide">End Scene</button>
+        </div>
+      </section>
       <div id="list" class="list"></div>
     </div>
 
@@ -207,6 +269,15 @@
       const statAllowEl = document.getElementById("statAllow");
       const statFlagEl = document.getElementById("statFlag");
       const statBlockEl = document.getElementById("statBlock");
+      const sceneInstanceEl = document.getElementById("sceneInstance");
+      const scenePresetEl = document.getElementById("scenePreset");
+      const sceneTitleEl = document.getElementById("sceneTitle");
+      const sceneSubtitleEl = document.getElementById("sceneSubtitle");
+      const sceneAccentEl = document.getElementById("sceneAccent");
+      const sceneSecondaryEl = document.getElementById("sceneSecondary");
+      const sceneBeginEl = document.getElementById("sceneBegin");
+      const sceneUpdateEl = document.getElementById("sceneUpdate");
+      const sceneEndEl = document.getElementById("sceneEnd");
       const maxItems = 100;
       const urlParams = new URLSearchParams(window.location.search);
       const apiToken = urlParams.get("token") || "";
@@ -249,6 +320,43 @@
           setStatus(`Override sent: ${action}`, "connected");
         } catch {
           setStatus("Override failed (network)", "closed");
+        }
+      }
+
+      function scenePayload() {
+        return {
+          sceneKey: scenePresetEl.value,
+          kicker: scenePresetEl.value.replace(/-/g, " "),
+          title: sceneTitleEl.value,
+          subtitle: sceneSubtitleEl.value,
+          countdownEndsAt: "",
+          parameters: {
+            accentColor: sceneAccentEl.value,
+            secondaryColor: sceneSecondaryEl.value,
+            intensity: 0.88,
+          },
+        };
+      }
+
+      async function sendSceneAction(action) {
+        const instance = sceneInstanceEl.value.trim() || "main";
+        const body = action === "end" ? {} : scenePayload();
+
+        try {
+          const response = await fetch(`/api/scenes/${encodeURIComponent(instance)}/${action}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}),
+            },
+            body: JSON.stringify(body),
+          });
+          setStatus(
+            response.ok ? `Scene ${action} sent` : `Scene ${action} failed`,
+            response.ok ? "connected" : "closed",
+          );
+        } catch {
+          setStatus(`Scene ${action} failed`, "closed");
         }
       }
 
@@ -336,6 +444,11 @@
       }
 
       function addItem(payload) {
+        if (String(payload.type || "").startsWith("scene.")) {
+          setStatus(`${payload.type}: ${payload?.target?.instance || "main"}`, "connected");
+          return;
+        }
+
         const key = entryKey(payload);
         const existingIndex = entries.findIndex((entry) => entryKey(entry) === key);
         if (existingIndex >= 0) entries.splice(existingIndex, 1);
@@ -391,6 +504,19 @@
 
       verdictFilterEl.addEventListener("change", renderList);
       searchFilterEl.addEventListener("input", renderList);
+      scenePresetEl.addEventListener("change", () => {
+        const labels = {
+          "starting-soon": ["Starting Soon", "Grab a drink and settle in."],
+          brb: ["Be Right Back", "The stream will continue shortly."],
+          ending: ["Stream Ending", "Thanks for hanging out."],
+        };
+        const [title, subtitle] = labels[scenePresetEl.value] || labels["starting-soon"];
+        sceneTitleEl.value = title;
+        sceneSubtitleEl.value = subtitle;
+      });
+      sceneBeginEl.addEventListener("click", () => sendSceneAction("begin"));
+      sceneUpdateEl.addEventListener("click", () => sendSceneAction("update"));
+      sceneEndEl.addEventListener("click", () => sendSceneAction("end"));
       loadInitialQueue();
       connect();
     </script>

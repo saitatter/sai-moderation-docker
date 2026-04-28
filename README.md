@@ -115,15 +115,32 @@ Dashboard supports:
 - live verdict feed
 - initial queue restore from `/api/moderation/queue`
 - manual actions: `Approve`, `Block`, `False Positive`
+- scene controls for `starting-soon`, `brb`, and `ending`
 
 ## Chat Overlay Setup
 
-Use `sai-chat-overlay` in moderation mode so OBS renders only messages approved
+Use `sai-stream-overlay` in moderation mode so OBS renders only messages approved
 by this backend:
 
 ```text
 http://localhost:8080/?eventSource=moderation&overlayWsUrl=ws%3A%2F%2Flocalhost%3A8787%2Fws%3Fchannel%3Doverlay
 ```
+
+## Scene Overlay Setup
+
+Add a separate OBS Browser Source for scenes:
+
+```text
+http://localhost:8080/overlay/scene.html?instance=main&overlayWsUrl=ws%3A%2F%2Flocalhost%3A8787%2Fws%3Fchannel%3Doverlay&sceneApiUrl=http%3A%2F%2Flocalhost%3A8787
+```
+
+Scene API endpoints:
+
+- `GET /api/scenes/{instance}/state`
+- `GET /api/scenes/state`
+- `POST /api/scenes/{instance}/begin`
+- `POST /api/scenes/{instance}/update`
+- `POST /api/scenes/{instance}/end`
 
 ## Security and Rate Limits
 

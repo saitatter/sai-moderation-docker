@@ -2,7 +2,7 @@
 
 ## Phase 0: Foundation
 
-- Keep release standards aligned with `sai-chat-overlay`:
+- Keep release standards aligned with `sai-stream-overlay`:
   - semantic-release
   - conventional commit PR-title enforcement
   - CODEOWNERS ownership gate
