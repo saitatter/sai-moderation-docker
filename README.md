@@ -119,7 +119,7 @@ Dashboard supports:
 
 ## Chat Overlay Setup
 
-Use `sai-chat-overlay` in moderation mode so OBS renders only messages approved
+Use `sai-stream-overlay` in moderation mode so OBS renders only messages approved
 by this backend:
 
 ```text
