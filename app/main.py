@@ -252,7 +252,10 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
                 "reason": moderation.get("reason", "model-response"),
                 "receivedAt": payload.get("receivedAt") or _utc_now_iso(),
             }
-            overlay_event = _build_overlay_chat_event(payload, moderation)
+            overlay_event = _build_overlay_chat_event(
+                {**payload, "receivedAt": dashboard_event["receivedAt"]},
+                moderation,
+            )
             _remember_event(dashboard_event, overlay_event)
             dashboard_delivered = await event_hub.publish("dashboard", dashboard_event)
             metrics["eventPublishes"] += 1
@@ -320,6 +323,10 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
             metrics["eventPublishes"] += 1
 
             if action in {"approve", "falsePositive"} and message_id in moderation_state["messagesById"]:
+                dashboard_event = dict(moderation_state["messagesById"][message_id]["dashboard"])
+                dashboard_event["verdict"] = "allow"
+                _remember_capped(moderation_state["approved"], dashboard_event)
+
                 overlay_event = dict(moderation_state["messagesById"][message_id]["overlay"])
                 overlay_event["verdict"] = "allow"
                 overlay_event["status"] = "approved"

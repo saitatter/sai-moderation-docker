@@ -199,6 +199,11 @@ def test_override_approve_replays_message_to_overlay() -> None:
     assert overlay_payload["verdict"] == "allow"
     assert overlay_payload["manualOverride"]["action"] == "approve"
 
+    queue = client.get("/api/moderation/queue")
+    assert queue.status_code == 200
+    assert queue.json()["approved"][0]["messageId"] == "m-review"
+    assert queue.json()["approved"][0]["verdict"] == "allow"
+
 
 def test_moderation_queue_and_health_include_state() -> None:
     app = create_app(moderation_provider=FakeProvider())
