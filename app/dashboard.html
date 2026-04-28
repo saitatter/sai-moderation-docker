@@ -332,7 +332,7 @@
       }
 
       function entryKey(payload) {
-        return `${payload.eventType || "event"}:${payload.messageId || payload.requestedAt || Date.now()}`;
+        return `${payload.eventType || "event"}:${payload.messageId || payload.receivedAt || payload.requestedAt || Date.now()}`;
       }
 
       function addItem(payload) {

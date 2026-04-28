@@ -13,6 +13,9 @@ from .event_hub import EventHub
 from .moderation_provider import ModerationProvider, create_moderation_provider
 from .rate_limiter import RequestLimiter
 
+MAX_MODERATION_STATE_ITEMS = 100
+MAX_MESSAGE_LOOKUP_ITEMS = 500
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -133,29 +136,42 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
         metrics["rateLimitedRequests"] += 1
         raise HTTPException(status_code=429, detail="Too many requests")
 
+    def _remember_capped(target: list[dict[str, Any]], event: dict[str, Any]) -> None:
+        target.insert(0, event)
+        if len(target) > MAX_MODERATION_STATE_ITEMS:
+            target.pop()
+
+    def _remember_message_lookup(
+        message_id: Any,
+        dashboard_event: dict[str, Any],
+        overlay_event: dict[str, Any],
+    ) -> None:
+        if not message_id:
+            return
+        messages_by_id = moderation_state["messagesById"]
+        messages_by_id[message_id] = {
+            "dashboard": dashboard_event,
+            "overlay": overlay_event,
+        }
+        while len(messages_by_id) > MAX_MESSAGE_LOOKUP_ITEMS:
+            oldest_key = next(iter(messages_by_id))
+            messages_by_id.pop(oldest_key, None)
+
     def _remember_event(dashboard_event: dict[str, Any], overlay_event: dict[str, Any]) -> None:
         message_id = dashboard_event.get("messageId")
         verdict = str(dashboard_event.get("verdict", "")).lower()
 
-        moderation_state["latest"].insert(0, dashboard_event)
-        moderation_state["latest"] = moderation_state["latest"][:100]
-        if message_id:
-            moderation_state["messagesById"][message_id] = {
-                "dashboard": dashboard_event,
-                "overlay": overlay_event,
-            }
+        _remember_capped(moderation_state["latest"], dashboard_event)
+        _remember_message_lookup(message_id, dashboard_event, overlay_event)
 
         if verdict == "allow":
-            moderation_state["approved"].insert(0, dashboard_event)
-            moderation_state["approved"] = moderation_state["approved"][:100]
+            _remember_capped(moderation_state["approved"], dashboard_event)
             metrics["approvedMessages"] += 1
         elif verdict == "block":
-            moderation_state["rejected"].insert(0, dashboard_event)
-            moderation_state["rejected"] = moderation_state["rejected"][:100]
+            _remember_capped(moderation_state["rejected"], dashboard_event)
             metrics["blockedMessages"] += 1
         elif verdict == "flag":
-            moderation_state["pending"].insert(0, dashboard_event)
-            moderation_state["pending"] = moderation_state["pending"][:100]
+            _remember_capped(moderation_state["pending"], dashboard_event)
             metrics["flaggedMessages"] += 1
 
     @app.get("/")
@@ -181,6 +197,7 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
                     "pending": len(moderation_state["pending"]),
                     "approved": len(moderation_state["approved"]),
                     "rejected": len(moderation_state["rejected"]),
+                    "messageLookups": len(moderation_state["messagesById"]),
                 },
             }
         )

@@ -223,3 +223,36 @@ def test_moderation_queue_and_health_include_state() -> None:
     assert health.status_code == 200
     assert health.json()["queues"]["pending"] == 1
     assert health.json()["metrics"]["flaggedMessages"] == 1
+
+
+def test_moderation_state_is_capped() -> None:
+    os.environ["RATE_LIMIT_MAX"] = "1000"
+    app = create_app(moderation_provider=FakeProvider())
+    client = TestClient(app)
+
+    for index in range(501):
+        response = client.post(
+            "/v1/chat-events",
+            json={
+                "messageId": f"m-{index}",
+                "platform": "Twitch",
+                "username": "viewer",
+                "text": f"message {index}",
+                "verdict": "allow",
+            },
+        )
+        assert response.status_code == 202
+
+    queue = client.get("/api/moderation/queue")
+    health = client.get("/healthz")
+
+    assert queue.status_code == 200
+    queue_payload = queue.json()
+    assert len(queue_payload["latest"]) == 100
+    assert len(queue_payload["approved"]) == 100
+    assert queue_payload["latest"][0]["messageId"] == "m-500"
+
+    assert health.status_code == 200
+    assert health.json()["queues"]["latest"] == 100
+    assert health.json()["queues"]["approved"] == 100
+    assert health.json()["queues"]["messageLookups"] == 500
