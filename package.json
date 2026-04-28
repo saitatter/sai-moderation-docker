@@ -4,9 +4,9 @@
   "version": "0.0.0-development",
   "description": "Streamer.bot moderation bridge with Docker-first development workflow.",
   "scripts": {
-    "lint": "eslint src/**/*.js tests/**/*.js",
-    "format": "prettier --write \"src/**/*.js\" \"tests/**/*.js\" \"docs/**/*.md\" \"*.md\" \".github/**/*.yml\"",
-    "format:check": "prettier --check \"src/**/*.js\" \"tests/**/*.js\" \"docs/**/*.md\" \"*.md\" \".github/**/*.yml\"",
+    "lint": "eslint src/**/*.js tests/**/*.js scripts/**/*.cjs",
+    "format": "prettier --write \"src/**/*.js\" \"tests/**/*.js\" \"scripts/**/*.cjs\" \"docs/**/*.md\" \"*.md\" \".github/**/*.yml\"",
+    "format:check": "prettier --check \"src/**/*.js\" \"tests/**/*.js\" \"scripts/**/*.cjs\" \"docs/**/*.md\" \"*.md\" \".github/**/*.yml\"",
     "test": "vitest run",
     "check": "npm run lint && npm run format:check && npm run test"
   },

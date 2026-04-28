@@ -3,6 +3,7 @@
 Bridge service and internal moderation dashboard foundation for Streamer.bot workflows.
 
 Companion extension repo:
+
 - `sai-moderation-streamerbot-extension`:
   https://github.com/saitatter/sai-moderation-streamerbot-extension
 
@@ -25,6 +26,7 @@ npm run check
 - Conventional Commits are required.
 - Semantic release runs on pushes to `main`.
 - Patch releases are also triggered for `refactor`, `ci`, and `chore`.
+- Squash merges are supported when the squash commit body keeps the branch's conventional commit list.
 
 See [Action Plan](docs/ACTION_PLAN.md) for implementation phases.
 See [Integration Contract](docs/INTEGRATION_CONTRACT.md) for extension/backend schema.
