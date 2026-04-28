@@ -5,12 +5,19 @@ module.exports = {
       "@semantic-release/commit-analyzer",
       {
         releaseRules: [
+          { type: "feat", release: "minor" },
+          { type: "fix", release: "patch" },
+          { type: "perf", release: "patch" },
           { type: "refactor", release: "patch" },
           { type: "ci", release: "patch" },
-          { type: "chore", release: "patch" }
+          { type: "chore", release: "patch" },
+          { type: "docs", release: false },
+          { type: "test", release: false },
+          { type: "style", release: false },
+          { type: "build", release: false },
         ],
-        preset: "conventionalcommits"
-      }
+        preset: "conventionalcommits",
+      },
     ],
     [
       "@semantic-release/release-notes-generator",
@@ -26,15 +33,14 @@ module.exports = {
             { type: "ci", section: "🧰 CI & Build", hidden: false },
             { type: "chore", section: "🧰 CI & Build", hidden: false },
             { type: "docs", section: "📚 Docs", hidden: false },
-            { type: "test", section: "🧪 Tests", hidden: false }
-          ]
+            { type: "test", section: "🧪 Tests", hidden: false },
+          ],
         },
         writerOpts: {
-          commitsSort: ["scope", "subject"]
-        }
-      }
+          commitsSort: ["scope", "subject"],
+        },
+      },
     ],
-    "@semantic-release/github"
-  ]
+    "@semantic-release/github",
+  ],
 };
-
