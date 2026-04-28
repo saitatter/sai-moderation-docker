@@ -27,6 +27,7 @@ Examples:
 - PR titles must follow Conventional Commits.
 - Include validation steps (`npm test`, screenshots, logs where relevant).
 - Keep PRs focused and reviewable.
+- When squash merging, keep the branch commit list in the squash body so every conventional commit appears in the release changelog.
 
 ## Ownership
 

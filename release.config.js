@@ -1,6 +1,7 @@
 module.exports = {
   branches: ["main"],
   plugins: [
+    "./scripts/semantic-release/expand-squash-commits.cjs",
     [
       "@semantic-release/commit-analyzer",
       {
