@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from .event_hub import EventHub
@@ -74,8 +75,54 @@ def _build_overlay_chat_event(payload: dict[str, Any], moderation: dict[str, Any
     }
 
 
+def _normalize_scene_instance(value: str) -> str:
+    normalized = value.strip().lower()
+    if not normalized or len(normalized) > 40:
+        return "main"
+    if not all(char.isalnum() or char in {"_", "-"} for char in normalized):
+        return "main"
+    return normalized
+
+
+def _scene_event(event_type: str, instance: str, payload: dict[str, Any]) -> dict[str, Any]:
+    now = _utc_now_iso()
+    scene_key = str(payload.get("sceneKey") or "custom")
+    return {
+        "version": 1,
+        "id": f"scene-{instance}-{int(datetime.now(timezone.utc).timestamp() * 1000)}",
+        "type": event_type,
+        "source": "manual",
+        "status": "system",
+        "createdAt": now,
+        "receivedAt": now,
+        "target": {
+            "overlay": "scene",
+            "instance": instance,
+        },
+        "payload": {
+            "sceneKey": scene_key,
+            "kicker": str(payload.get("kicker") or ""),
+            "title": str(payload.get("title") or ""),
+            "subtitle": str(payload.get("subtitle") or ""),
+            "countdownEndsAt": str(payload.get("countdownEndsAt") or ""),
+            "parameters": payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {},
+        },
+        "display": {
+            "priority": "system",
+            "durationMs": 0,
+            "theme": scene_key,
+        },
+    }
+
+
 def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI:
     app = FastAPI(title="SAI Moderation Docker", version="0.1.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+    )
 
     event_hub = EventHub()
     provider = moderation_provider or create_moderation_provider()
@@ -100,6 +147,7 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
         "blockedMessages": 0,
         "flaggedMessages": 0,
         "manualOverlayPublishes": 0,
+        "sceneEventsPublished": 0,
     }
     moderation_state: dict[str, Any] = {
         "latest": [],
@@ -108,6 +156,7 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
         "rejected": [],
         "messagesById": {},
     }
+    scene_state: dict[str, dict[str, Any]] = {}
 
     dashboard_path = Path(__file__).with_name("dashboard.html")
 
@@ -196,6 +245,67 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
                 "rejected": moderation_state["rejected"],
             }
         )
+
+    @app.get("/api/scenes/{instance}/state")
+    async def scene_instance_state(instance: str) -> JSONResponse:
+        normalized_instance = _normalize_scene_instance(instance)
+        return JSONResponse(
+            {
+                "instance": normalized_instance,
+                "active": scene_state.get(normalized_instance),
+            }
+        )
+
+    @app.get("/api/scenes/state")
+    async def scene_state_all() -> JSONResponse:
+        return JSONResponse({"instances": scene_state})
+
+    @app.post("/api/scenes/{instance}/begin")
+    async def scene_begin(instance: str, request: Request) -> JSONResponse:
+        _ensure_authorized(request)
+        normalized_instance = _normalize_scene_instance(instance)
+        payload = await request.json()
+        event = _scene_event("scene.begin", normalized_instance, payload)
+        scene_state[normalized_instance] = event["payload"]
+        delivered = await event_hub.publish("overlay", event)
+        await event_hub.publish("dashboard", event)
+        metrics["eventPublishes"] += 2
+        metrics["sceneEventsPublished"] += 1
+        return JSONResponse({"accepted": True, "event": event, "delivered": delivered}, status_code=202)
+
+    @app.post("/api/scenes/{instance}/update")
+    async def scene_update(instance: str, request: Request) -> JSONResponse:
+        _ensure_authorized(request)
+        normalized_instance = _normalize_scene_instance(instance)
+        payload = await request.json()
+        current = scene_state.get(normalized_instance, {})
+        merged_payload = {
+            **current,
+            **payload,
+            "parameters": {
+                **(current.get("parameters") if isinstance(current.get("parameters"), dict) else {}),
+                **(payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {}),
+            },
+        }
+        event = _scene_event("scene.update", normalized_instance, merged_payload)
+        scene_state[normalized_instance] = event["payload"]
+        delivered = await event_hub.publish("overlay", event)
+        await event_hub.publish("dashboard", event)
+        metrics["eventPublishes"] += 2
+        metrics["sceneEventsPublished"] += 1
+        return JSONResponse({"accepted": True, "event": event, "delivered": delivered}, status_code=202)
+
+    @app.post("/api/scenes/{instance}/end")
+    async def scene_end(instance: str, request: Request) -> JSONResponse:
+        _ensure_authorized(request)
+        normalized_instance = _normalize_scene_instance(instance)
+        scene_state.pop(normalized_instance, None)
+        event = _scene_event("scene.end", normalized_instance, {})
+        delivered = await event_hub.publish("overlay", event)
+        await event_hub.publish("dashboard", event)
+        metrics["eventPublishes"] += 2
+        metrics["sceneEventsPublished"] += 1
+        return JSONResponse({"accepted": True, "event": event, "delivered": delivered}, status_code=202)
 
     @app.post("/v1/moderate")
     async def moderate(request: Request) -> JSONResponse:

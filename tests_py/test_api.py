@@ -223,3 +223,69 @@ def test_moderation_queue_and_health_include_state() -> None:
     assert health.status_code == 200
     assert health.json()["queues"]["pending"] == 1
     assert health.json()["metrics"]["flaggedMessages"] == 1
+
+
+def test_scene_begin_update_end_publish_overlay_events() -> None:
+    app = create_app(moderation_provider=FakeProvider())
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws?channel=overlay") as overlay_ws:
+        begin = client.post(
+            "/api/scenes/main/begin",
+            json={
+                "sceneKey": "starting-soon",
+                "title": "Starting Soon",
+                "subtitle": "Soon",
+                "parameters": {"accentColor": "#9146FF"},
+            },
+        )
+        begin_payload = overlay_ws.receive_json()
+
+        update = client.post(
+            "/api/scenes/main/update",
+            json={
+                "title": "Be Right Back",
+                "parameters": {"secondaryColor": "#00D1FF"},
+            },
+        )
+        update_payload = overlay_ws.receive_json()
+
+        end = client.post("/api/scenes/main/end", json={})
+        end_payload = overlay_ws.receive_json()
+
+    assert begin.status_code == 202
+    assert begin_payload["type"] == "scene.begin"
+    assert begin_payload["target"]["instance"] == "main"
+    assert begin_payload["payload"]["title"] == "Starting Soon"
+
+    assert update.status_code == 202
+    assert update_payload["type"] == "scene.update"
+    assert update_payload["payload"]["title"] == "Be Right Back"
+    assert update_payload["payload"]["parameters"]["accentColor"] == "#9146FF"
+    assert update_payload["payload"]["parameters"]["secondaryColor"] == "#00D1FF"
+
+    assert end.status_code == 202
+    assert end_payload["type"] == "scene.end"
+
+
+def test_scene_state_restores_active_instance() -> None:
+    app = create_app(moderation_provider=FakeProvider())
+    client = TestClient(app)
+
+    client.post(
+        "/api/scenes/background/begin",
+        json={
+            "sceneKey": "brb",
+            "title": "BRB",
+            "parameters": {"intensity": 0.5},
+        },
+    )
+
+    state = client.get("/api/scenes/background/state")
+    all_state = client.get("/api/scenes/state")
+
+    assert state.status_code == 200
+    assert state.json()["active"]["sceneKey"] == "brb"
+    assert state.json()["active"]["parameters"]["intensity"] == 0.5
+    assert all_state.status_code == 200
+    assert all_state.json()["instances"]["background"]["title"] == "BRB"
