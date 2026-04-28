@@ -56,5 +56,9 @@ module.exports = {
     applyExpansion(context);
     return null;
   },
+  generateNotes(_, context) {
+    applyExpansion(context);
+    return null;
+  },
   expandSquashCommits,
 };
