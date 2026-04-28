@@ -30,11 +30,7 @@ def _should_forward_to_overlay(verdict: str, forward_flags: bool) -> bool:
 
 
 def _platform_source(platform: Any) -> str:
-    normalized = str(platform or "unknown").strip().lower()
-    if normalized == "youtube":
-        return "youtube"
-    if normalized == "twitch":
-        return "twitch"
+    normalized = str(platform or "").strip().lower()
     return normalized or "unknown"
 
 
@@ -140,6 +136,21 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
         target.insert(0, event)
         if len(target) > MAX_MODERATION_STATE_ITEMS:
             target.pop()
+
+    def _remove_message_from_queue(target: list[dict[str, Any]], message_id: Any) -> None:
+        target[:] = [event for event in target if event.get("messageId") != message_id]
+
+    def _move_message_to_approved(message_id: Any) -> dict[str, Any] | None:
+        entry = moderation_state["messagesById"].get(message_id)
+        if not entry:
+            return None
+
+        dashboard_event = entry["dashboard"]
+        dashboard_event["verdict"] = "allow"
+        for queue_name in ["pending", "rejected", "approved"]:
+            _remove_message_from_queue(moderation_state[queue_name], message_id)
+        _remember_capped(moderation_state["approved"], dashboard_event)
+        return dashboard_event
 
     def _remember_message_lookup(
         message_id: Any,
@@ -323,9 +334,10 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
             metrics["eventPublishes"] += 1
 
             if action in {"approve", "falsePositive"} and message_id in moderation_state["messagesById"]:
-                dashboard_event = dict(moderation_state["messagesById"][message_id]["dashboard"])
-                dashboard_event["verdict"] = "allow"
-                _remember_capped(moderation_state["approved"], dashboard_event)
+                dashboard_event = _move_message_to_approved(message_id)
+                if dashboard_event:
+                    await event_hub.publish("dashboard", dashboard_event)
+                    metrics["eventPublishes"] += 1
 
                 overlay_event = dict(moderation_state["messagesById"][message_id]["overlay"])
                 overlay_event["verdict"] = "allow"

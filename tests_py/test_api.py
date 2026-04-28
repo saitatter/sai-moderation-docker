@@ -182,19 +182,26 @@ def test_override_approve_replays_message_to_overlay() -> None:
         },
     )
 
-    with client.websocket_connect("/ws?channel=overlay") as overlay_ws:
-        response = client.post(
-            "/v1/overrides",
-            json={
-                "messageId": "m-review",
-                "action": "approve",
-                "operatorId": "mod-1",
-                "reason": "safe after review",
-            },
-        )
-        overlay_payload = overlay_ws.receive_json()
+    with client.websocket_connect("/ws?channel=dashboard") as dashboard_ws:
+        with client.websocket_connect("/ws?channel=overlay") as overlay_ws:
+            response = client.post(
+                "/v1/overrides",
+                json={
+                    "messageId": "m-review",
+                    "action": "approve",
+                    "operatorId": "mod-1",
+                    "reason": "safe after review",
+                },
+            )
+            override_requested = dashboard_ws.receive_json()
+            dashboard_payload = dashboard_ws.receive_json()
+            overlay_payload = overlay_ws.receive_json()
 
     assert response.status_code == 202
+    assert override_requested["eventType"] == "moderation.override.requested"
+    assert dashboard_payload["eventType"] == "moderation.result"
+    assert dashboard_payload["messageId"] == "m-review"
+    assert dashboard_payload["verdict"] == "allow"
     assert overlay_payload["type"] == "chat.message"
     assert overlay_payload["verdict"] == "allow"
     assert overlay_payload["manualOverride"]["action"] == "approve"
@@ -203,6 +210,7 @@ def test_override_approve_replays_message_to_overlay() -> None:
     assert queue.status_code == 200
     assert queue.json()["approved"][0]["messageId"] == "m-review"
     assert queue.json()["approved"][0]["verdict"] == "allow"
+    assert queue.json()["pending"] == []
 
 
 def test_moderation_queue_and_health_include_state() -> None:
