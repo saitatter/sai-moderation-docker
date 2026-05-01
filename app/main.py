@@ -166,6 +166,18 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
         _remember_capped(moderation_state["approved"], dashboard_event)
         return dashboard_event
 
+    def _move_message_to_rejected(message_id: Any) -> dict[str, Any] | None:
+        entry = moderation_state["messagesById"].get(message_id)
+        if not entry:
+            return None
+
+        dashboard_event = entry["dashboard"]
+        dashboard_event["verdict"] = "block"
+        for queue_name in ["pending", "rejected", "approved"]:
+            _remove_message_from_queue(moderation_state[queue_name], message_id)
+        _remember_capped(moderation_state["rejected"], dashboard_event)
+        return dashboard_event
+
     def _remember_message_lookup(
         message_id: Any,
         dashboard_event: dict[str, Any],
@@ -367,6 +379,11 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
                 await event_hub.publish("overlay", overlay_event)
                 metrics["eventPublishes"] += 1
                 metrics["manualOverlayPublishes"] += 1
+            elif action == "block" and message_id in moderation_state["messagesById"]:
+                dashboard_event = _move_message_to_rejected(message_id)
+                if dashboard_event:
+                    await event_hub.publish("dashboard", dashboard_event)
+                    metrics["eventPublishes"] += 1
 
             if override_forward_url:
                 headers = {"Content-Type": "application/json"}

@@ -243,6 +243,45 @@ def test_override_approve_replays_message_to_overlay() -> None:
     assert queue.json()["pending"] == []
 
 
+def test_override_block_moves_message_to_rejected_queue() -> None:
+    app = create_app(moderation_provider=FakeProvider())
+    client = TestClient(app)
+
+    client.post(
+        "/v1/chat-events",
+        json={
+            "messageId": "m-reject",
+            "platform": "Twitch",
+            "username": "carol",
+            "text": "manual block",
+            "verdict": "flag",
+        },
+    )
+
+    with client.websocket_connect("/ws?channel=dashboard") as dashboard_ws:
+        response = client.post(
+            "/v1/overrides",
+            json={
+                "messageId": "m-reject",
+                "action": "block",
+                "operatorId": "mod-1",
+                "reason": "unsafe after review",
+            },
+        )
+        override_requested = dashboard_ws.receive_json()
+        dashboard_payload = dashboard_ws.receive_json()
+
+    queue = client.get("/api/moderation/queue")
+
+    assert response.status_code == 202
+    assert override_requested["eventType"] == "moderation.override.requested"
+    assert dashboard_payload["eventType"] == "moderation.result"
+    assert dashboard_payload["messageId"] == "m-reject"
+    assert dashboard_payload["verdict"] == "block"
+    assert queue.json()["rejected"][0]["messageId"] == "m-reject"
+    assert queue.json()["pending"] == []
+
+
 def test_moderation_queue_and_health_include_state() -> None:
     app = create_app(moderation_provider=FakeProvider())
     client = TestClient(app)
