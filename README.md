@@ -10,9 +10,9 @@
 ![Streamer.bot Ready](https://img.shields.io/badge/Streamer.bot-Ready-blue)
 ![WebSocket](https://img.shields.io/badge/WebSocket-Live%20Events-6A5ACD)
 
-> FastAPI moderation bridge for Streamer.bot workflows, with an OBS-ready dashboard dock and normalized overlay events for `sai-stream-overlay`.
+> FastAPI moderation bridge for Streamer.bot and ShowRunner workflows, with normalized overlay events and queue APIs.
 
-`sai-moderation-docker` receives chat events, runs moderation, keeps a lightweight dashboard queue, and publishes approved overlay events over WebSocket. It is designed to sit between Streamer.bot and stream overlays so chat rendering stays clean, auditable, and easy to replace later.
+`sai-moderation-docker` receives chat events, runs moderation, keeps a lightweight moderation queue, and can publish approved overlay events over WebSocket. In the ShowRunner architecture, this service is the backend/API only; the primary moderation UI lives inside ShowRunner.
 
 ---
 
@@ -26,7 +26,7 @@
   - `overlay`
 - Normalized overlay payloads with `type: "chat.message"`
 - Backward-compatible `eventType: "overlay.message"` payloads
-- OBS dock dashboard at `/dashboard`
+- Legacy OBS dock dashboard at `/dashboard`
 - Queue/state for latest, pending, approved, and rejected messages
 - Manual dashboard actions: `Approve`, `Block`, `False Positive`
 - Optional manual override forwarding callback
@@ -51,11 +51,13 @@ Health check:
 http://127.0.0.1:8787/healthz
 ```
 
-Dashboard:
+Legacy dashboard:
 
 ```text
 http://127.0.0.1:8787/dashboard
 ```
+
+The built-in `/dashboard` page is kept for compatibility while ShowRunner becomes the main moderation UI.
 
 ### Local Development
 
@@ -100,6 +102,8 @@ The backend will:
 
 Set `FORWARD_FLAGS_TO_OVERLAY=true` if flagged messages should also reach the overlay.
 
+ShowRunner automation nodes can request a moderation decision without automatically publishing to the overlay by sending `deliveryMode: "decisionOnly"`. The backend still updates queue/dashboard state and returns the moderation result.
+
 Example payload:
 
 ```json
@@ -110,7 +114,8 @@ Example payload:
   "userId": "user-7",
   "username": "viewer_name",
   "text": "message body",
-  "receivedAt": "2026-04-24T18:00:00Z"
+  "receivedAt": "2026-04-24T18:00:00Z",
+  "deliveryMode": "decisionOnly"
 }
 ```
 
@@ -224,7 +229,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8787
 | Endpoint                    | Purpose                                         |
 | --------------------------- | ----------------------------------------------- |
 | `GET /healthz`              | Health, metrics, queue sizes, subscriber counts |
-| `GET /dashboard`            | OBS dock dashboard                              |
+| `GET /dashboard`            | Legacy OBS dock dashboard                       |
 | `GET /api/moderation/queue` | Current dashboard queue state                   |
 | `POST /v1/moderate`         | Run moderation provider only                    |
 | `POST /v1/chat-events`      | Main chat event ingestion endpoint              |

@@ -29,6 +29,20 @@ def _should_forward_to_overlay(verdict: str, forward_flags: bool) -> bool:
     return False
 
 
+def _delivery_mode(payload: dict[str, Any]) -> str:
+    mode = str(payload.get("deliveryMode") or payload.get("delivery_mode") or "publishOverlay")
+    normalized = mode.strip()
+    if normalized in {"decisionOnly", "publishOverlay"}:
+        return normalized
+    return "publishOverlay"
+
+
+def _should_publish_overlay(payload: dict[str, Any], verdict: str, forward_flags: bool) -> bool:
+    if _delivery_mode(payload) == "decisionOnly":
+        return False
+    return _should_forward_to_overlay(verdict, forward_flags)
+
+
 def _platform_source(platform: Any) -> str:
     normalized = str(platform or "").strip().lower()
     return normalized or "unknown"
@@ -248,6 +262,7 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
 
         try:
             payload: dict[str, Any] = await request.json()
+            delivery_mode = _delivery_mode(payload)
             metrics["chatEventsProcessed"] += 1
 
             moderation = await provider.moderate(payload)
@@ -272,13 +287,14 @@ def create_app(moderation_provider: ModerationProvider | None = None) -> FastAPI
             metrics["eventPublishes"] += 1
 
             overlay_delivered = 0
-            if _should_forward_to_overlay(moderation["verdict"], forward_flags_to_overlay):
+            if _should_publish_overlay(payload, moderation["verdict"], forward_flags_to_overlay):
                 overlay_delivered = await event_hub.publish("overlay", overlay_event)
                 metrics["eventPublishes"] += 1
 
             return JSONResponse(
                 {
                     "accepted": True,
+                    "deliveryMode": delivery_mode,
                     "moderation": moderation,
                     "delivered": {
                         "dashboard": dashboard_delivered,

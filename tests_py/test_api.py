@@ -119,6 +119,36 @@ def test_chat_events_publish_dashboard_and_overlay() -> None:
     assert overlay_payload["messageId"] == "m-42"
 
 
+def test_chat_events_decision_only_updates_queue_without_overlay_publish() -> None:
+    app = create_app(moderation_provider=FakeProvider())
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws?channel=dashboard") as dashboard_ws:
+        response = client.post(
+            "/v1/chat-events",
+            json={
+                "messageId": "m-decision",
+                "platform": "Twitch",
+                "username": "alice",
+                "text": "moderate only",
+                "deliveryMode": "decisionOnly",
+            },
+        )
+        dashboard_payload = dashboard_ws.receive_json()
+
+    response_payload = response.json()
+    queue = client.get("/api/moderation/queue")
+
+    assert response.status_code == 202
+    assert response_payload["deliveryMode"] == "decisionOnly"
+    assert response_payload["delivered"]["overlay"] == 0
+    assert dashboard_payload["eventType"] == "moderation.result"
+    assert dashboard_payload["messageId"] == "m-decision"
+    assert dashboard_payload["verdict"] == "allow"
+    assert queue.status_code == 200
+    assert queue.json()["approved"][0]["messageId"] == "m-decision"
+
+
 def test_chat_events_do_not_publish_blocked_messages_to_overlay() -> None:
     app = create_app(moderation_provider=FakeProvider())
     client = TestClient(app)
