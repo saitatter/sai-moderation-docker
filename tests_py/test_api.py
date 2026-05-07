@@ -112,4 +112,229 @@ def test_chat_events_publish_dashboard_and_overlay() -> None:
     assert dashboard_payload["eventType"] == "moderation.result"
     assert dashboard_payload["messageId"] == "m-42"
     assert overlay_payload["eventType"] == "overlay.message"
+    assert overlay_payload["type"] == "chat.message"
+    assert overlay_payload["status"] == "approved"
+    assert overlay_payload["actor"]["displayName"] == "alice"
+    assert overlay_payload["payload"]["message"] == "hello"
     assert overlay_payload["messageId"] == "m-42"
+
+
+def test_chat_events_decision_only_updates_queue_without_overlay_publish() -> None:
+    app = create_app(moderation_provider=FakeProvider())
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws?channel=dashboard") as dashboard_ws:
+        response = client.post(
+            "/v1/chat-events",
+            json={
+                "messageId": "m-decision",
+                "platform": "Twitch",
+                "username": "alice",
+                "text": "moderate only",
+                "deliveryMode": "decisionOnly",
+            },
+        )
+        dashboard_payload = dashboard_ws.receive_json()
+
+    response_payload = response.json()
+    queue = client.get("/api/moderation/queue")
+
+    assert response.status_code == 202
+    assert response_payload["deliveryMode"] == "decisionOnly"
+    assert response_payload["delivered"]["overlay"] == 0
+    assert dashboard_payload["eventType"] == "moderation.result"
+    assert dashboard_payload["messageId"] == "m-decision"
+    assert dashboard_payload["verdict"] == "allow"
+    assert queue.status_code == 200
+    assert queue.json()["approved"][0]["messageId"] == "m-decision"
+
+
+def test_chat_events_do_not_publish_blocked_messages_to_overlay() -> None:
+    app = create_app(moderation_provider=FakeProvider())
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws?channel=dashboard") as dashboard_ws:
+        response = client.post(
+            "/v1/chat-events",
+            json={
+                "messageId": "m-block",
+                "platform": "Twitch",
+                "username": "alice",
+                "text": "blocked",
+                "verdict": "block",
+            },
+        )
+        dashboard_payload = dashboard_ws.receive_json()
+
+    assert response.status_code == 202
+    assert response.json()["delivered"]["overlay"] == 0
+    assert dashboard_payload["eventType"] == "moderation.result"
+    assert dashboard_payload["verdict"] == "block"
+
+
+def test_flagged_messages_publish_to_overlay_when_enabled() -> None:
+    os.environ["FORWARD_FLAGS_TO_OVERLAY"] = "true"
+    app = create_app(moderation_provider=FakeProvider())
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws?channel=overlay") as overlay_ws:
+        response = client.post(
+            "/v1/chat-events",
+            json={
+                "messageId": "m-flag",
+                "platform": "YouTube",
+                "username": "bob",
+                "text": "needs review",
+                "verdict": "flag",
+            },
+        )
+        overlay_payload = overlay_ws.receive_json()
+
+    assert response.status_code == 202
+    assert overlay_payload["eventType"] == "overlay.message"
+    assert overlay_payload["type"] == "chat.message"
+    assert overlay_payload["source"] == "youtube"
+    assert overlay_payload["payload"]["message"] == "needs review"
+
+
+def test_override_approve_replays_message_to_overlay() -> None:
+    app = create_app(moderation_provider=FakeProvider())
+    client = TestClient(app)
+
+    client.post(
+        "/v1/chat-events",
+        json={
+            "messageId": "m-review",
+            "platform": "Twitch",
+            "username": "carol",
+            "text": "manual approval",
+            "verdict": "flag",
+        },
+    )
+
+    with client.websocket_connect("/ws?channel=dashboard") as dashboard_ws:
+        with client.websocket_connect("/ws?channel=overlay") as overlay_ws:
+            response = client.post(
+                "/v1/overrides",
+                json={
+                    "messageId": "m-review",
+                    "action": "approve",
+                    "operatorId": "mod-1",
+                    "reason": "safe after review",
+                },
+            )
+            override_requested = dashboard_ws.receive_json()
+            dashboard_payload = dashboard_ws.receive_json()
+            overlay_payload = overlay_ws.receive_json()
+
+    assert response.status_code == 202
+    assert override_requested["eventType"] == "moderation.override.requested"
+    assert dashboard_payload["eventType"] == "moderation.result"
+    assert dashboard_payload["messageId"] == "m-review"
+    assert dashboard_payload["verdict"] == "allow"
+    assert overlay_payload["type"] == "chat.message"
+    assert overlay_payload["verdict"] == "allow"
+    assert overlay_payload["manualOverride"]["action"] == "approve"
+
+    queue = client.get("/api/moderation/queue")
+    assert queue.status_code == 200
+    assert queue.json()["approved"][0]["messageId"] == "m-review"
+    assert queue.json()["approved"][0]["verdict"] == "allow"
+    assert queue.json()["pending"] == []
+
+
+def test_override_block_moves_message_to_rejected_queue() -> None:
+    app = create_app(moderation_provider=FakeProvider())
+    client = TestClient(app)
+
+    client.post(
+        "/v1/chat-events",
+        json={
+            "messageId": "m-reject",
+            "platform": "Twitch",
+            "username": "carol",
+            "text": "manual block",
+            "verdict": "flag",
+        },
+    )
+
+    with client.websocket_connect("/ws?channel=dashboard") as dashboard_ws:
+        response = client.post(
+            "/v1/overrides",
+            json={
+                "messageId": "m-reject",
+                "action": "block",
+                "operatorId": "mod-1",
+                "reason": "unsafe after review",
+            },
+        )
+        override_requested = dashboard_ws.receive_json()
+        dashboard_payload = dashboard_ws.receive_json()
+
+    queue = client.get("/api/moderation/queue")
+
+    assert response.status_code == 202
+    assert override_requested["eventType"] == "moderation.override.requested"
+    assert dashboard_payload["eventType"] == "moderation.result"
+    assert dashboard_payload["messageId"] == "m-reject"
+    assert dashboard_payload["verdict"] == "block"
+    assert queue.json()["rejected"][0]["messageId"] == "m-reject"
+    assert queue.json()["pending"] == []
+
+
+def test_moderation_queue_and_health_include_state() -> None:
+    app = create_app(moderation_provider=FakeProvider())
+    client = TestClient(app)
+
+    client.post(
+        "/v1/chat-events",
+        json={
+            "messageId": "m-queue",
+            "platform": "Twitch",
+            "username": "dave",
+            "text": "queue me",
+            "verdict": "flag",
+        },
+    )
+
+    queue = client.get("/api/moderation/queue")
+    health = client.get("/healthz")
+
+    assert queue.status_code == 200
+    assert queue.json()["pending"][0]["messageId"] == "m-queue"
+    assert health.status_code == 200
+    assert health.json()["queues"]["pending"] == 1
+    assert health.json()["metrics"]["flaggedMessages"] == 1
+
+
+def test_moderation_state_is_capped() -> None:
+    os.environ["RATE_LIMIT_MAX"] = "1000"
+    app = create_app(moderation_provider=FakeProvider())
+    client = TestClient(app)
+
+    for index in range(501):
+        response = client.post(
+            "/v1/chat-events",
+            json={
+                "messageId": f"m-{index}",
+                "platform": "Twitch",
+                "username": "viewer",
+                "text": f"message {index}",
+                "verdict": "allow",
+            },
+        )
+        assert response.status_code == 202
+
+    queue = client.get("/api/moderation/queue")
+    health = client.get("/healthz")
+
+    assert queue.status_code == 200
+    queue_payload = queue.json()
+    assert len(queue_payload["latest"]) == 100
+    assert len(queue_payload["approved"]) == 100
+    assert queue_payload["latest"][0]["messageId"] == "m-500"
+
+    assert health.status_code == 200
+    assert health.json()["queues"]["latest"] == 100
+    assert health.json()["queues"]["approved"] == 100
+    assert health.json()["queues"]["messageLookups"] == 500
