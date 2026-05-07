@@ -1,0 +1,48 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: Europe/Bucharest
+    open-pull-requests-limit: 10
+    groups:
+      release-tools:
+        patterns:
+          - "semantic-release"
+          - "@semantic-release/*"
+          - "conventional-changelog-conventionalcommits"
+      vite-react:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+          - "react"
+          - "react-dom"
+      test-tooling:
+        patterns:
+          - "jest"
+          - "vitest"
+          - "@playwright/*"
+          - "playwright"
+      typescript-types:
+        patterns:
+          - "typescript"
+          - "tsx"
+          - "@types/*"
+      nest:
+        patterns:
+          - "@nestjs/*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:30"
+      timezone: Europe/Bucharest
+    groups:
+      github-actions:
+        patterns:
+          - "*"
